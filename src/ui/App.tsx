@@ -12,6 +12,7 @@ import { ApproveSheet, RelayBar } from './RelayBar'
 import { Device } from './Screen'
 import { loadSettings, saveSettings, type Settings } from './settings'
 import { SettingsPanel } from './SettingsPanel'
+import { useBottomGuard } from './useBottomGuard'
 import { useKeyboard } from './useKeyboard'
 
 type ChatItem =
@@ -46,6 +47,7 @@ export function App() {
   const [relayDetail, setRelayDetail] = useState('')
   const [approval, setApproval] = useState<{ client: string; host: string; answer: (ok: boolean) => void } | null>(null)
   const typing = useKeyboard()
+  useBottomGuard()
   /** Ficha da reconexão em andamento; `stop` interrompe o laço. */
   const recon = useRef<{ stop: boolean } | null>(null)
 
