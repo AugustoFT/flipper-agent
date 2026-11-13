@@ -7,15 +7,18 @@ export interface Settings {
   provider: ProviderId
   keys: Record<ProviderId, string>
   models: Record<ProviderId, string>
+  /** Endereço base do provedor "compat" (ex.: https://api.openai.com/v1, http://192.168.0.10:11434/v1). */
+  compatBaseUrl: string
   vision: boolean
   showAllDevices: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'gemini',
-  keys: { gemini: '', openrouter: '' },
+  keys: { gemini: '', openrouter: '', compat: '' },
   // "gemini-flash-latest" é um alias que o Google mantém apontando para o Flash atual.
-  models: { gemini: 'gemini-flash-latest', openrouter: '' },
+  models: { gemini: 'gemini-flash-latest', openrouter: '', compat: '' },
+  compatBaseUrl: 'https://api.openai.com/v1',
   vision: true,
   showAllDevices: false,
 }

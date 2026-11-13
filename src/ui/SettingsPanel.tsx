@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { listGeminiModels, listOpenRouterFreeModels } from '../agent/providers'
+import { listCompatModels, listGeminiModels, listOpenRouterFreeModels } from '../agent/providers'
 import type { ModelInfo, ProviderId } from '../agent/types'
 import type { Settings } from './settings'
 
 const KEY_LINKS: Record<ProviderId, { url: string; label: string }> = {
   gemini: { url: 'https://aistudio.google.com/apikey', label: 'Criar chave grátis no Google AI Studio' },
   openrouter: { url: 'https://openrouter.ai/keys', label: 'Criar chave grátis no OpenRouter' },
+  compat: { url: 'https://platform.openai.com/api-keys', label: 'Chave da OpenAI (ou do provedor que você usar)' },
 }
 
 export function SettingsPanel(props: { value: Settings; onChange: (s: Settings) => void; onClose: () => void }) {
@@ -19,7 +20,12 @@ export function SettingsPanel(props: { value: Settings; onChange: (s: Settings) 
   async function loadModels() {
     setStatus('Buscando modelos…')
     try {
-      const list = p === 'gemini' ? await listGeminiModels(s.keys.gemini) : await listOpenRouterFreeModels()
+      const list =
+        p === 'gemini'
+          ? await listGeminiModels(s.keys.gemini)
+          : p === 'openrouter'
+            ? await listOpenRouterFreeModels()
+            : await listCompatModels(s.compatBaseUrl, s.keys.compat)
       setModels(list)
       setStatus(list.length ? `${list.length} modelos.` : 'Nenhum modelo encontrado.')
     } catch (e) {
@@ -47,8 +53,23 @@ export function SettingsPanel(props: { value: Settings; onChange: (s: Settings) 
           <select value={p} onChange={(e) => (setModels([]), setStatus(''), set({ provider: e.target.value as ProviderId }))}>
             <option value="gemini">Google Gemini (tier grátis)</option>
             <option value="openrouter">OpenRouter (modelos :free)</option>
+            <option value="compat">Outro compatível com OpenAI (OpenAI, DeepSeek, Groq, Ollama…)</option>
           </select>
         </label>
+
+        {p === 'compat' && (
+          <label className="field">
+            <span>Endereço da API</span>
+            <input
+              inputMode="url"
+              autoComplete="off"
+              value={s.compatBaseUrl}
+              placeholder="https://api.openai.com/v1"
+              onChange={(e) => set({ compatBaseUrl: e.target.value.trim() })}
+            />
+            <small>Ex.: https://api.deepseek.com/v1 · https://api.groq.com/openai/v1 · Ollama: http://IP-do-PC:11434/v1</small>
+          </label>
+        )}
 
         <label className="field">
           <span>Chave da API</span>
@@ -56,7 +77,7 @@ export function SettingsPanel(props: { value: Settings; onChange: (s: Settings) 
             type="password"
             autoComplete="off"
             value={s.keys[p]}
-            placeholder="cole a chave aqui"
+            placeholder={p === 'compat' ? 'opcional (Ollama local não pede)' : 'cole a chave aqui'}
             onChange={(e) => set({ keys: { ...s.keys, [p]: e.target.value.trim() } })}
           />
           <a href={KEY_LINKS[p].url} target="_blank" rel="noreferrer">

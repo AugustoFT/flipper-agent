@@ -4,7 +4,7 @@
   "description": "Agente de IA que controla o Flipper Zero pelo Bluetooth do celular.",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#121212",
-  "theme_color": "#121212",
+  "background_color": "#e8e7e2",
+  "theme_color": "#e8e7e2",
   "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
 }

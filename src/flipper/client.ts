@@ -8,7 +8,8 @@ import type { Transport } from './transport'
 
 export type Key = 'UP' | 'DOWN' | 'RIGHT' | 'LEFT' | 'OK' | 'BACK'
 const KEY_CODE: Record<Key, number> = { UP: 0, DOWN: 1, RIGHT: 2, LEFT: 3, OK: 4, BACK: 5 }
-const INPUT = { PRESS: 0, RELEASE: 1, SHORT: 2, LONG: 3 } as const
+const INPUT = { PRESS: 0, RELEASE: 1, SHORT: 2, LONG: 3, REPEAT: 4 } as const
+export type InputType = keyof typeof INPUT
 
 export interface FileEntry {
   name: string
@@ -161,6 +162,17 @@ export class FlipperClient {
     const code = KEY_CODE[key]
     const ev = (type: number) => ({ field: F.guiSendInputEvent, build: (w: PbWriter) => w.uint(1, code).uint(2, type) })
     await this.rpc.sendBatch([ev(INPUT.PRESS), ev(long ? INPUT.LONG : INPUT.SHORT), ev(INPUT.RELEASE)], `tecla ${key}`)
+  }
+
+  /**
+   * Um evento de tecla isolado, sem esperar a resposta (o controle remoto da tela usa isto para se
+   * comportar como o botão físico: PRESS ao encostar, LONG/REPEAT segurando, SHORT+RELEASE ao soltar).
+   */
+  inputEvent(key: Key, type: InputType): void {
+    const code = KEY_CODE[key]
+    this.rpc
+      .sendBatch([{ field: F.guiSendInputEvent, build: (w: PbWriter) => w.uint(1, code).uint(2, INPUT[type]) }], `tecla ${key}`)
+      .catch(() => {})
   }
 
   /** Aperta e espera a tela assentar. Devolve o quadro final. */

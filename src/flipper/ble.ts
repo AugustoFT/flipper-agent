@@ -53,6 +53,15 @@ async function step<T>(name: string, log: (s: string) => void, fn: () => Promise
 
 /** Web Bluetooth não expõe o MTU. Começamos grande e caímos para 20 bytes se o celular recusar. */
 const CHUNK_SIZES = [244, 128, 20]
+
+/**
+ * Escrita SEM resposta (o firmware declara CHAR_PROP_WRITE_WITHOUT_RESP na characteristic de entrada):
+ * poupa uma ida e volta pelo rádio a cada envio. Mas ela não pode passar do MTU negociado e não
+ * existe "escrita longa" sem resposta. No iPhone o MTU é ≥ 185 (182 de dados), então só mensagens
+ * até esse tamanho — teclas, ping e comandos, quase tudo — usam o caminho rápido. Arquivos grandes
+ * continuam no caminho com resposta, em pedaços.
+ */
+const FAST_MAX = 182
 const CREDIT_WAIT_MS = 20000
 
 export function bleSupported(): boolean {
@@ -67,13 +76,21 @@ export class BleTransport implements Transport {
   private chunkIdx = 0
   private writing: Promise<void> = Promise.resolve()
   private closed = false
+  /** Desliga sozinho se o celular recusar a escrita sem resposta. */
+  private fastWrites: boolean
   /** Avisado quando o Flipper abre/fecha a sessão RPC (crédito > 0 / = 0). */
   onRpcState: (open: boolean) => void = () => {}
 
   private constructor(
     private device: BluetoothDevice,
     private tx: BluetoothRemoteGATTCharacteristic,
-  ) {}
+  ) {
+    this.fastWrites = Boolean(tx.properties?.writeWithoutResponse) && typeof tx.writeValueWithoutResponse === 'function'
+  }
+
+  get writeMode() {
+    return this.fastWrites ? 'sem resposta' : 'com resposta'
+  }
 
   get name() {
     return this.device.name ?? 'Flipper'
@@ -121,6 +138,7 @@ export class BleTransport implements Transport {
     await step('ativar notificações RX', log, () => rx.startNotifications())
     await step('ativar notificações fluxo', log, () => flow.startNotifications())
     t.announce(await step('ler crédito inicial', log, () => flow.readValue()))
+    log(`escrita: ${t.writeMode}`)
     log(t.credit > 0 ? `Pronto (janela de ${t.credit} bytes).` : 'Conectado, mas o RPC está fechado: desbloqueie o Flipper.')
     return t
   }
@@ -166,6 +184,19 @@ export class BleTransport implements Transport {
   }
 
   private async sendNow(data: Uint8Array) {
+    // Caminho rápido: mensagem pequena, cabe num pacote e no crédito → uma escrita sem resposta.
+    // Só se couber no crédito ATUAL: o Flipper reabastece apenas quando o crédito zera, então
+    // esperar "crédito ≥ tamanho" travaria para sempre. Senão, vai pelo caminho em pedaços abaixo.
+    if (this.fastWrites && data.length <= FAST_MAX && data.length <= this.credit && !this.closed) {
+      this.credit -= data.length
+      try {
+        await this.tx.writeValueWithoutResponse(data)
+        return
+      } catch {
+        this.credit += data.length
+        this.fastWrites = false // este celular não aceita: volta ao caminho com resposta
+      }
+    }
     let off = 0
     while (off < data.length) {
       if (this.closed) throw new Error('Bluetooth desconectado')

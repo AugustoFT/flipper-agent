@@ -12,7 +12,7 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["web-bluetooth", "node"]
+    "types": ["web-bluetooth", "node", "vite/client"]
   },
   "include": ["src", "scripts", "vite.config.ts"]
 }

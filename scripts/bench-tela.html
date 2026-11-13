@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Bench tela</title>
+<pre id="out">rodando…</pre>
+<script type="module">
+  // Compara o desenho antigo (fillRect por pixel, 512x256) com o novo (ImageData 128x64).
+  import { toPixels } from '/src/flipper/screen.ts'
+  import { LcdPainter } from '/src/flipper/paint.ts'
+
+  // Cópia do algoritmo antigo (fillRect por pixel), só para comparação.
+  function drawFrame(ctx, frame, scale, bg, fg) {
+    const px = toPixels(frame)
+    ctx.fillStyle = bg
+    ctx.fillRect(0, 0, 128 * scale, 64 * scale)
+    ctx.fillStyle = fg
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 128; x++) if (px[y * 128 + x]) ctx.fillRect(x * scale, y * scale, scale, scale)
+  }
+
+  const N = 600
+  const frames = Array.from({ length: 8 }, () => {
+    const d = new Uint8Array(1024)
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 256
+    return { seq: 1, at: 0, data: d, orientation: 0 }
+  })
+
+  const old = document.createElement('canvas')
+  old.width = 512
+  old.height = 256
+  const octx = old.getContext('2d')
+  const neu = document.createElement('canvas')
+  neu.width = 128
+  neu.height = 64
+  const painter = new LcdPainter(neu.getContext('2d'))
+
+  function time(fn) {
+    for (let i = 0; i < 50; i++) fn(i) // aquecimento
+    const t0 = performance.now()
+    for (let i = 0; i < N; i++) fn(i)
+    return (performance.now() - t0) / N
+  }
+  const a = time((i) => drawFrame(octx, frames[i % 8], 4, '#ff8c29', '#1b1b1b'))
+  const b = time((i) => painter.paint(frames[i % 8].data, 0))
+  document.getElementById('out').textContent = JSON.stringify({ antigo_ms: +a.toFixed(3), novo_ms: +b.toFixed(3), ganho: +(a / b).toFixed(1) })
+</script>

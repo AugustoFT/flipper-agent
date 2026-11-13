@@ -47,7 +47,8 @@ export interface Provider {
   complete(system: string, msgs: Msg[], tools: ToolSpec[], opts: { vision: boolean; signal: AbortSignal }): Promise<Completion>
 }
 
-export type ProviderId = 'gemini' | 'openrouter'
+/** gemini e openrouter têm endereço fixo; "compat" é qualquer servidor no formato OpenAI. */
+export type ProviderId = 'gemini' | 'openrouter' | 'compat'
 
 export interface ModelInfo {
   id: string

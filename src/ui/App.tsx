@@ -5,7 +5,7 @@ import type { Msg } from '../agent/types'
 import { BleTransport, bleSupported } from '../flipper/ble'
 import { FlipperClient } from '../flipper/client'
 import { BackgroundTest } from './BackgroundTest'
-import { Screen } from './Screen'
+import { Device } from './Screen'
 import { loadSettings, saveSettings, type Settings } from './settings'
 import { SettingsPanel } from './SettingsPanel'
 
@@ -24,6 +24,7 @@ export function App() {
   const [connLog, setConnLog] = useState('')
   const [connTrace, setConnTrace] = useState<string[]>([])
   const [battery, setBattery] = useState<string>('')
+  const [latency, setLatency] = useState<number | null>(null)
   const [items, setItems] = useState<ChatItem[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -36,9 +37,41 @@ export function App() {
   useEffect(() => {
     saveSettings(settings)
   }, [settings])
+
+  // ?demo na URL: conecta num Flipper simulado (conhecer o app sem aparelho, revisar o design).
+  useEffect(() => {
+    if (!new URLSearchParams(location.search).has('demo')) return
+    import('../flipper/demo').then(({ DemoTransport }) => {
+      setFz(new FlipperClient(new DemoTransport()))
+      setConn('on')
+      setBattery('87')
+    })
+  }, [])
   useEffect(() => {
     listEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [items])
+
+  // Latência real do Bluetooth (ida e volta de um ping RPC), a cada 5 s enquanto o agente está parado.
+  // Serve de "sinal de vida" visível e mantém a conexão aquecida.
+  useEffect(() => {
+    if (!fz || busy) return
+    let alive = true
+    const tick = async () => {
+      const t0 = performance.now()
+      try {
+        await fz.ping()
+        if (alive) setLatency(Math.round(performance.now() - t0))
+      } catch {
+        if (alive) setLatency(null)
+      }
+    }
+    tick()
+    const id = setInterval(tick, 5000)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [fz, busy])
 
   const add = (it: ChatItem) => setItems((xs) => [...xs, it])
   const patchTool = (id: string, patch: Partial<Extract<ChatItem, { kind: 'tool' }>>) =>
@@ -87,7 +120,8 @@ export function App() {
     if (!text || busy || !fz) return
     const key = settings.keys[settings.provider]
     const model = settings.models[settings.provider]
-    if (!key || !model) {
+    const needsKey = settings.provider !== 'compat'
+    if ((needsKey && !key) || !model || (settings.provider === 'compat' && !settings.compatBaseUrl)) {
       setShowSettings(true)
       return
     }
@@ -98,7 +132,7 @@ export function App() {
     abort.current = ctrl
     try {
       await runTurn(history.current, text, {
-        provider: makeProvider(settings.provider, key, model),
+        provider: makeProvider(settings.provider, key, model, settings.compatBaseUrl),
         fz,
         vision: settings.vision,
         signal: ctrl.signal,
@@ -125,73 +159,94 @@ export function App() {
   }
 
   const noBle = !bleSupported()
-  const needsKey = !settings.keys[settings.provider]
+  const needsKey = settings.provider !== 'compat' && !settings.keys[settings.provider]
 
   return (
     <div className="app">
-      <header className="top">
-        <h1>Flipper Agent</h1>
-        <span className={`pill ${conn}`}>
-          {conn === 'on' ? `● ${fz?.name ?? ''}${battery ? ` · ${battery}%` : ''}` : conn === 'connecting' ? 'conectando…' : 'desconectado'}
-        </span>
-        <button type="button" className="ghost" onClick={() => setShowBgTest(true)} aria-label="Teste de segundo plano">
-          🧪
+      <header className="status">
+        <span className={`dot ${conn}`} aria-hidden="true" />
+        <span className="device-name">{conn === 'on' ? fz?.name : conn === 'connecting' ? 'Conectando' : 'Sem Flipper'}</span>
+        {conn === 'on' && (
+          <span className="readouts">
+            {latency !== null && <span title="Latência do Bluetooth (ida e volta)">{latency} ms</span>}
+            {battery && <span title="Bateria do Flipper">{battery}%</span>}
+          </span>
+        )}
+        <span className="spacer" />
+        <button type="button" className="icon-btn" onClick={() => setShowBgTest(true)} aria-label="Teste de segundo plano">
+          <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+            <path d="M7 2h6M8 2v5L3.5 15a2 2 0 0 0 1.7 3h9.6a2 2 0 0 0 1.7-3L12 7V2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+          </svg>
         </button>
-        <button type="button" className="ghost" onClick={() => setShowSettings(true)} aria-label="Configurações">
-          ⚙
+        <button type="button" className="icon-btn" onClick={() => setShowSettings(true)} aria-label="Configurações">
+          <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+            <path d="M3 6h9m4 0h1M3 14h1m4 0h9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            <circle cx="14" cy="6" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+            <circle cx="6" cy="14" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
         </button>
       </header>
 
       {noBle ? (
-        <section className="empty">
-          <h2>Este navegador não tem Bluetooth web</h2>
-          <p>
-            <b>iPhone:</b> instale o navegador <b>Bluefy</b> (grátis na App Store) e abra este mesmo endereço nele.
-          </p>
-          <p>
-            <b>Android:</b> abra no <b>Chrome</b>.
-          </p>
-          <p>
-            <b>Computador:</b> Chrome ou Edge.
-          </p>
+        <section className="onboard">
+          <div className="bezel">
+            <div className="lcd lcd-text">Sem Bluetooth neste navegador</div>
+          </div>
+          <dl className="where">
+            <dt>iPhone</dt>
+            <dd>Instale o navegador Bluefy (grátis na App Store) e abra este mesmo endereço nele.</dd>
+            <dt>Android</dt>
+            <dd>Abra no Chrome.</dd>
+            <dt>Computador</dt>
+            <dd>Chrome ou Edge.</dd>
+          </dl>
         </section>
       ) : !fz ? (
-        <section className="empty">
-          <h2>Conecte seu Flipper</h2>
-          <p>Ligue o Bluetooth do Flipper (Configurações → Bluetooth → ON). Na primeira vez, o celular pede o PIN que aparece na tela do Flipper.</p>
-          <div className="row wrap">
-            <button type="button" className="primary" onClick={() => connect()} disabled={conn === 'connecting'}>
-              {conn === 'connecting' ? 'Conectando…' : 'Conectar Flipper'}
-            </button>
-            <button type="button" onClick={() => connect(true)} disabled={conn === 'connecting'}>
-              Não aparece? Mostrar todos
-            </button>
+        <section className="onboard">
+          <div className="bezel">
+            <div className="lcd lcd-text">{conn === 'connecting' ? 'Procurando…' : 'Aguardando Flipper'}</div>
           </div>
+          <button type="button" className="btn primary wide" onClick={() => connect()} disabled={conn === 'connecting'}>
+            {conn === 'connecting' ? 'Conectando…' : 'Conectar Flipper'}
+          </button>
+          <button type="button" className="btn quiet wide" onClick={() => connect(true)} disabled={conn === 'connecting'}>
+            Não aparece? Mostrar todos os aparelhos
+          </button>
           <p className="hint">
-            Se o Flipper não aparecer: feche o app oficial do Flipper (ele "segura" a conexão) e confira em Ajustes → Bluefy se o
-            Bluetooth está permitido.
+            Deixe o Bluetooth do Flipper ligado e na tela inicial. Feche o app oficial do Flipper: ele prende a conexão. Na
+            primeira vez, digite o PIN que aparece no Flipper.
           </p>
           {connLog && <p className="log">{connLog}</p>}
           {connTrace.length > 0 && conn !== 'connecting' && (
             <details className="diag">
               <summary>Diagnóstico da conexão ({connTrace.length} linhas)</summary>
               <pre className="report">{connTrace.join('\n')}</pre>
-              <button type="button" onClick={() => copyText(connTrace.join('\n'))}>
+              <button type="button" className="btn quiet" onClick={() => copyText(connTrace.join('\n'))}>
                 Copiar diagnóstico
               </button>
             </details>
           )}
-          {needsKey && (
-            <p className="hint">
-              Para conversar com o agente, coloque uma chave grátis em <button type="button" className="link" onClick={() => setShowSettings(true)}>configurações</button>.
-            </p>
-          )}
         </section>
       ) : (
-        <Screen fz={fz} disabled={busy} />
+        <Device fz={fz} locked={busy} />
       )}
 
       <main className="chat" aria-live="polite">
+        {items.length === 0 && fz && (
+          <div className="chat-empty">
+            {needsKey ? (
+              <p>
+                Para conversar com o agente, escolha uma IA em{' '}
+                <button type="button" className="link" onClick={() => setShowSettings(true)}>
+                  configurações
+                </button>
+                . O Gemini tem plano grátis.
+              </p>
+            ) : (
+              <p>Peça em português: “abra o Infravermelho e me diga quais controles eu tenho”.</p>
+            )}
+          </div>
+        )}
         {items.map((it, i) => (
           <ChatRow key={i} it={it} />
         ))}
@@ -200,15 +255,16 @@ export function App() {
 
       <footer className="composer">
         {items.length > 0 && !busy && (
-          <button type="button" className="ghost small" onClick={newChat}>
+          <button type="button" className="link small" onClick={newChat}>
             Nova conversa
           </button>
         )}
-        <div className="row">
+        <div className="compose-row">
           <textarea
             rows={1}
             value={input}
-            placeholder={fz ? 'Ex.: abra o Infravermelho e me diga quais controles tenho' : 'Conecte o Flipper primeiro'}
+            aria-label="Mensagem para o agente"
+            placeholder={fz ? 'Peça algo ao agente' : 'Conecte o Flipper primeiro'}
             disabled={!fz}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -219,12 +275,16 @@ export function App() {
             }}
           />
           {busy ? (
-            <button type="button" className="stop" onClick={() => abort.current?.abort()}>
-              Parar
+            <button type="button" className="send stop" onClick={() => abort.current?.abort()} aria-label="Parar o agente">
+              <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+                <rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor" />
+              </svg>
             </button>
           ) : (
-            <button type="button" className="primary" onClick={send} disabled={!fz || !input.trim()}>
-              Enviar
+            <button type="button" className="send" onClick={send} disabled={!fz || !input.trim()} aria-label="Enviar">
+              <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+                <path d="M10 16V4m0 0-5 5m5-5 5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </button>
           )}
         </div>
@@ -241,10 +301,10 @@ function ChatRow({ it }: { it: ChatItem }) {
   if (it.kind === 'agent') return <div className="bubble agent">{it.text}</div>
   if (it.kind === 'info') return <div className="info">{it.text}</div>
   return (
-    <div className={`tool ${it.error ? 'error' : ''}`}>
-      <div>
-        <b>{it.running ? '⏳' : it.error ? '⚠' : '✓'} {it.label}</b> <span>{it.detail}</span>
-      </div>
+    <div className={`tool${it.error ? ' error' : ''}${it.running ? ' running' : ''}`}>
+      <p>
+        <span className="tool-name">{it.label}</span> {it.detail}
+      </p>
       {it.image && <img src={`data:image/png;base64,${it.image}`} alt="Tela do Flipper vista pelo agente" />}
     </div>
   )
@@ -292,7 +352,15 @@ async function copyText(text: string) {
 }
 
 function describeArgs(args: Record<string, unknown>): string {
-  if (Array.isArray(args.keys)) return args.keys.join(' ')
+  if (Array.isArray(args.keys)) {
+    const sym: Record<string, string> = { UP: '▲', DOWN: '▼', LEFT: '◀', RIGHT: '▶', OK: 'OK', BACK: '↩' }
+    return args.keys
+      .map((k) => {
+        const [name, mod] = String(k).toUpperCase().split(':')
+        return `${sym[name] ?? name}${mod === 'LONG' ? '(longo)' : ''}`
+      })
+      .join(' ')
+  }
   return Object.values(args)
     .filter((v) => typeof v === 'string' || typeof v === 'number')
     .join(' · ')

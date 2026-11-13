@@ -99,13 +99,20 @@ export async function listGeminiModels(key: string): Promise<ModelInfo[]> {
     .map((m: any) => ({ id: m.name.replace(/^models\//, ''), label: m.displayName ?? m.name, vision: true }))
 }
 
-// ---------------------------------------------------------------- OpenRouter (formato OpenAI)
+// ---------------------------------------------------------------- Formato OpenAI (OpenRouter e qualquer compatível)
+//
+// O mesmo formato de /chat/completions é falado por OpenRouter, OpenAI, DeepSeek, Groq, Mistral,
+// Ollama/LM Studio locais etc. Uma classe só, mudando o endereço base.
 
 const OPENROUTER = 'https://openrouter.ai/api/v1'
 
-export class OpenRouterProvider implements Provider {
-  readonly id = 'openrouter' as const
-  constructor(private key: string, private model: string) {}
+export class OpenAICompatProvider implements Provider {
+  constructor(
+    readonly id: ProviderId,
+    private baseUrl: string,
+    private key: string,
+    private model: string,
+  ) {}
 
   private toMessages(system: string, msgs: Msg[], vision: boolean) {
     const out: unknown[] = [{ role: 'system', content: system }]
@@ -143,12 +150,9 @@ export class OpenRouterProvider implements Provider {
       messages: this.toMessages(system, msgs, opts.vision),
       tools: tools.map((t) => ({ type: 'function', function: t })),
     }
-    const j = await postJson(
-      `${OPENROUTER}/chat/completions`,
-      { authorization: `Bearer ${this.key}`, 'x-title': 'Flipper Agent' },
-      body,
-      opts.signal,
-    )
+    const headers: Record<string, string> = this.key ? { authorization: `Bearer ${this.key}` } : {}
+    if (this.id === 'openrouter') headers['x-title'] = 'Flipper Agent'
+    const j = await postJson(`${this.baseUrl.replace(/\/+$/, '')}/chat/completions`, headers, body, opts.signal)
     const msg = j.choices?.[0]?.message
     if (!msg) throw new ApiError(j.error?.message ?? 'O modelo não respondeu.')
     const calls: ToolCall[] = (msg.tool_calls ?? []).map((c: any, i: number) => {
@@ -177,6 +181,16 @@ export async function listOpenRouterFreeModels(): Promise<ModelInfo[]> {
     }))
 }
 
-export function makeProvider(id: ProviderId, key: string, model: string): Provider {
-  return id === 'gemini' ? new GeminiProvider(key, model) : new OpenRouterProvider(key, model)
+/** Lista modelos de um servidor compatível com OpenAI (GET /models). */
+export async function listCompatModels(baseUrl: string, key: string): Promise<ModelInfo[]> {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, { headers: key ? { authorization: `Bearer ${key}` } : {} })
+  if (!res.ok) throw new ApiError(`Não consegui listar os modelos (${res.status}). Endereço e chave estão certos?`)
+  const j = await res.json()
+  return (j.data ?? j.models ?? []).map((m: any) => ({ id: m.id ?? m.name, label: m.id ?? m.name, vision: true }))
+}
+
+export function makeProvider(id: ProviderId, key: string, model: string, baseUrl = ''): Provider {
+  if (id === 'gemini') return new GeminiProvider(key, model)
+  if (id === 'openrouter') return new OpenAICompatProvider(id, OPENROUTER, key, model)
+  return new OpenAICompatProvider(id, baseUrl, key, model)
 }

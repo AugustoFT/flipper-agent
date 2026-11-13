@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FlipperClient } from '../flipper/client'
 import { HEIGHT, WIDTH } from '../flipper/screen'
-import { drawFrame } from '../agent/image'
+import { LcdPainter } from '../flipper/paint'
 
 interface Sample {
   t: number // ms desde o início
@@ -124,9 +124,16 @@ export function BackgroundTest({ fz, onClose }: { fz: FlipperClient | null; onCl
     const ctx = canvas?.getContext('2d')
     if (!canvas || !video || !ctx) return
     const t0 = Date.now()
+    const lcd = document.createElement('canvas')
+    lcd.width = WIDTH
+    lcd.height = HEIGHT
+    const painter = new LcdPainter(lcd.getContext('2d')!)
+    ctx.imageSmoothingEnabled = false
     const draw = () => {
-      if (fz?.screen.frame) drawFrame(ctx, fz.screen.frame, 2, '#ff8c29', '#1b1b1b')
-      else {
+      if (fz?.screen.frame) {
+        painter.paint(fz.screen.frame.data, fz.screen.frame.orientation)
+        ctx.drawImage(lcd, 0, 0, canvas.width, canvas.height)
+      } else {
         ctx.fillStyle = '#ff8c29'
         ctx.fillRect(0, 0, canvas.width, canvas.height)
       }
