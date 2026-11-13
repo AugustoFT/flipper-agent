@@ -20,6 +20,14 @@ const CH_RX = '19ed82ae-ed21-4c9d-4145-228e61fe0000'
 const CH_TX = '19ed82ae-ed21-4c9d-4145-228e62fe0000'
 const CH_FLOW = '19ed82ae-ed21-4c9d-4145-228e63fe0000'
 
+/**
+ * UUID de 16 bits que o Flipper ANUNCIA (não é o do serviço serial, que só aparece depois de conectar).
+ * Firmware (serial_profile.c): Service_UUID_16 = 0x3080 | cor do aparelho (0 a 3).
+ * Filtrar por ele acha o Flipper mesmo com nome personalizado — filtrar por "Flipper…" falha
+ * quando o dono renomeou o aparelho (o Momentum anuncia o nome escolhido).
+ */
+const ADV_UUIDS = [0x3080, 0x3081, 0x3082, 0x3083]
+
 /** Web Bluetooth não expõe o MTU. Começamos grande e caímos para 20 bytes se o celular recusar. */
 const CHUNK_SIZES = [244, 128, 20]
 const CREDIT_WAIT_MS = 20000
@@ -57,7 +65,11 @@ export class BleTransport implements Transport {
     const device = await navigator.bluetooth.requestDevice(
       showAll
         ? { acceptAllDevices: true, optionalServices: [SERIAL_SERVICE] }
-        : { filters: [{ namePrefix: 'Flipper' }, { services: [SERIAL_SERVICE] }], optionalServices: [SERIAL_SERVICE] },
+        : {
+            // Filtros são "OU": qualquer um que bater mostra o aparelho.
+            filters: [...ADV_UUIDS.map((u) => ({ services: [u] })), { namePrefix: 'Flipper' }],
+            optionalServices: [SERIAL_SERVICE],
+          },
     )
     log(`Conectando a ${device.name ?? 'dispositivo'}…`)
     const server = await device.gatt!.connect()

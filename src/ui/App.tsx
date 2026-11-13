@@ -43,11 +43,11 @@ export function App() {
   const patchTool = (id: string, patch: Partial<Extract<ChatItem, { kind: 'tool' }>>) =>
     setItems((xs) => xs.map((x) => (x.kind === 'tool' && x.id === id ? { ...x, ...patch } : x)))
 
-  async function connect() {
+  async function connect(showAll = settings.showAllDevices) {
     setConn('connecting')
     setConnLog('Abrindo a lista de dispositivos…')
     try {
-      const t = await BleTransport.connect(settings.showAllDevices, setConnLog)
+      const t = await BleTransport.connect(showAll, setConnLog)
       const client = new FlipperClient(t)
       t.onRpcState = (open) => add({ kind: 'info', text: open ? 'RPC reaberto.' : 'O Flipper fechou o RPC (bloqueado?). Desbloqueie para continuar.' })
       t.onClose((reason) => {
@@ -148,9 +148,18 @@ export function App() {
         <section className="empty">
           <h2>Conecte seu Flipper</h2>
           <p>Ligue o Bluetooth do Flipper (Configurações → Bluetooth → ON). Na primeira vez, o celular pede o PIN que aparece na tela do Flipper.</p>
-          <button type="button" className="primary" onClick={connect} disabled={conn === 'connecting'}>
-            {conn === 'connecting' ? 'Conectando…' : 'Conectar Flipper'}
-          </button>
+          <div className="row wrap">
+            <button type="button" className="primary" onClick={() => connect()} disabled={conn === 'connecting'}>
+              {conn === 'connecting' ? 'Conectando…' : 'Conectar Flipper'}
+            </button>
+            <button type="button" onClick={() => connect(true)} disabled={conn === 'connecting'}>
+              Não aparece? Mostrar todos
+            </button>
+          </div>
+          <p className="hint">
+            Se o Flipper não aparecer: feche o app oficial do Flipper (ele "segura" a conexão) e confira em Ajustes → Bluefy se o
+            Bluetooth está permitido.
+          </p>
           {connLog && <p className="log">{connLog}</p>}
           {needsKey && (
             <p className="hint">
