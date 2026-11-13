@@ -1,0 +1,17 @@
+{
+  // Worker do relay: OAuth (login do Claude) + endpoint MCP + um Durable Object por aparelho.
+  "name": "flipper-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // global_fetch_strictly_public: exigido pela biblioteca de OAuth para buscar documentos de cliente (CIMD).
+  "compatibility_flags": ["global_fetch_strictly_public"],
+  "kv_namespaces": [
+    // No deploy: `npx wrangler kv namespace create OAUTH_KV` e cole o id aqui.
+    { "binding": "OAUTH_KV", "id": "PREENCHER_NO_DEPLOY" }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "DEVICE", "class_name": "Device" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Device"] }],
+  "observability": { "enabled": true }
+}

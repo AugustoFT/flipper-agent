@@ -11,7 +11,14 @@ export interface Settings {
   compatBaseUrl: string
   vision: boolean
   showAllDevices: boolean
+  /** Modo Claude: o Claude controla o Flipper por um conector MCP, via servidor do relay. */
+  relayOn: boolean
+  /** Endereço do servidor do relay (Cloudflare Worker). */
+  relayUrl: string
 }
+
+/** Servidor do relay publicado. Vazio até o deploy; dá para trocar nas configurações. */
+export const RELAY_URL = ''
 
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'gemini',
@@ -21,6 +28,8 @@ export const DEFAULT_SETTINGS: Settings = {
   compatBaseUrl: 'https://api.openai.com/v1',
   vision: true,
   showAllDevices: false,
+  relayOn: false,
+  relayUrl: RELAY_URL,
 }
 
 const STORAGE_KEY = 'flipper-agent:settings'

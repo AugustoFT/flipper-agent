@@ -6,7 +6,9 @@ import { BleTransport, bleSupported } from '../flipper/ble'
 import { FlipperClient } from '../flipper/client'
 import { FlipperLink } from '../flipper/link'
 import { UsbTransport, usbKind } from '../flipper/usb'
+import { loadIdentity, RelayClient, resetIdentity, type RelayState } from '../relay/client'
 import { BackgroundTest } from './BackgroundTest'
+import { ApproveSheet, RelayBar } from './RelayBar'
 import { Device } from './Screen'
 import { loadSettings, saveSettings, type Settings } from './settings'
 import { SettingsPanel } from './SettingsPanel'
@@ -38,6 +40,11 @@ export function App() {
   const chatRef = useRef<HTMLElement>(null)
   /** Conexão atual para o agente: troca a cada reconexão sem interromper a tarefa. */
   const link = useRef(new FlipperLink()).current
+  // Modo Claude: código do aparelho, estado da ponte e o pedido de aprovação aberto (se houver).
+  const [relayId, setRelayId] = useState(loadIdentity)
+  const [relayState, setRelayState] = useState<RelayState>('off')
+  const [relayDetail, setRelayDetail] = useState('')
+  const [approval, setApproval] = useState<{ client: string; host: string; answer: (ok: boolean) => void } | null>(null)
   const typing = useKeyboard()
   /** Ficha da reconexão em andamento; `stop` interrompe o laço. */
   const recon = useRef<{ stop: boolean } | null>(null)
@@ -87,6 +94,29 @@ export function App() {
   }, [fz, busy])
 
   const add = (it: ChatItem) => setItems((xs) => [...xs, it])
+  // Liga/desliga a ponte com o Claude. As ferramentas usam o mesmo `link` do agente local: se a
+  // conexão com o Flipper cair, a chamada do Claude espera a reconexão como as do Gemini.
+  useEffect(() => {
+    if (!settings.relayOn || !settings.relayUrl) {
+      setRelayState('off')
+      return
+    }
+    const client = new RelayClient(settings.relayUrl, relayId, link, {
+      onState: (st, detail) => (setRelayState(st), setRelayDetail(detail ?? '')),
+      onApprove: (clientName, host) =>
+        new Promise<boolean>((resolve) => {
+          navigator.vibrate?.([30, 60, 30])
+          setApproval({ client: clientName, host, answer: (ok) => (setApproval(null), resolve(ok)) })
+        }),
+      onToolStart: (c) =>
+        add({ kind: 'tool', id: `claude-${c.id}`, label: `Claude ${toolLabel(c.name)}`, detail: describeArgs(c.args), running: true }),
+      onToolEnd: (r) =>
+        patchTool(`claude-${r.id}`, { running: false, image: r.image, error: r.isError, detail: r.isError ? r.text : summarize(r.text) }),
+    })
+    client.start()
+    return () => client.stop()
+  }, [settings.relayOn, settings.relayUrl, relayId, link])
+
   const patchTool = (id: string, patch: Partial<Extract<ChatItem, { kind: 'tool' }>>) =>
     setItems((xs) => xs.map((x) => (x.kind === 'tool' && x.id === id ? { ...x, ...patch } : x)))
 
@@ -292,6 +322,8 @@ ${connectHint(err)}`)
         </button>
       </header>
 
+      {settings.relayOn && settings.relayUrl && <RelayBar state={relayState} detail={relayDetail} code={relayId.code} fz={fz} />}
+
       {noBle && !cable ? (
         <section className="onboard">
           <div className="bezel">
@@ -365,7 +397,9 @@ ${connectHint(err)}`)
       <main className="chat" aria-live="polite" ref={chatRef}>
         {items.length === 0 && fz && (
           <div className="chat-empty">
-            {needsKey ? (
+            {settings.relayOn && settings.relayUrl ? (
+              <p>Modo Claude ligado: converse pelo app do Claude. O que ele fizer no Flipper aparece aqui.</p>
+            ) : needsKey ? (
               <p>
                 Para conversar com o agente, escolha uma IA em{' '}
                 <button type="button" className="link" onClick={() => setShowSettings(true)}>
@@ -421,7 +455,16 @@ ${connectHint(err)}`)
       </footer>
 
       {showBgTest && <BackgroundTest fz={fz} onClose={() => setShowBgTest(false)} />}
-      {showSettings && <SettingsPanel value={settings} onChange={setSettings} onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <SettingsPanel
+          value={settings}
+          onChange={setSettings}
+          onClose={() => setShowSettings(false)}
+          relayCode={relayId.code}
+          onResetCode={() => setRelayId(resetIdentity())}
+        />
+      )}
+      {approval && <ApproveSheet client={approval.client} host={approval.host} onAnswer={approval.answer} />}
     </div>
   )
 }

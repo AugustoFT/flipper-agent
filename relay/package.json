@@ -1,0 +1,20 @@
+{
+  "name": "flipper-relay",
+  "private": true,
+  "type": "module",
+  "description": "Ponte entre o Claude (conector MCP) e o Flipper Agent aberto no celular.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "teste": "cd .. && npx tsx relay/teste/ponta-a-ponta.ts"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261110.1",
+    "typescript": "~5.6.2",
+    "wrangler": "^4.161.0"
+  }
+}

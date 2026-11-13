@@ -660,3 +660,92 @@ select {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- modo Claude (relay) ---------- */
+
+.relay-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  font-size: var(--step--1);
+}
+.relay-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.relay-bar.online .relay-dot {
+  background: var(--live);
+}
+.relay-bar.connecting .relay-dot {
+  background: var(--accent);
+}
+.relay-bar.denied .relay-dot {
+  background: var(--danger);
+}
+.relay-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.relay-text small {
+  color: var(--muted);
+}
+.relay-code-mini {
+  /* Fonte legível, não a de pixel: o código é digitado no Claude, e no pixel 8 e S se confundem. */
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.relay-pip {
+  flex: none;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+.relay-thumb {
+  flex: none;
+  width: 36px;
+  height: 18px;
+  border-radius: 3px;
+  background: var(--lcd-bg);
+  object-fit: cover;
+}
+.pip-src-hidden {
+  display: none;
+}
+.sheet-sub {
+  margin: 18px 0 0;
+  font-size: var(--step-0);
+}
+.relay-code {
+  flex: 1;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  align-self: center;
+}
+
+/* Contêiner próprio: dentro de .sheet-body, ".row button" venceria .btn.primary (especificidade maior). */
+.approve-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.approve-actions .btn {
+  flex: 1;
+}

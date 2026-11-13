@@ -13,7 +13,7 @@ export class DemoTransport implements Transport {
   readonly name = 'Flipper demo'
   private data: Array<(c: Uint8Array) => void> = []
   private deframer = new Deframer()
-  private stream = 0
+  private stream: ReturnType<typeof setInterval> | undefined
   private sel = 0
   private lastKey = ''
 
@@ -29,8 +29,8 @@ export class DemoTransport implements Transport {
   async send(bytes: Uint8Array) {
     for (const raw of this.deframer.push(bytes)) {
       const m = decodeMain(raw)
-      if (m.field === F.guiStartScreenStream && !this.stream) this.stream = window.setInterval(() => this.frame(), 100)
-      if (m.field === F.guiStopScreenStream) clearInterval(this.stream), (this.stream = 0)
+      if (m.field === F.guiStartScreenStream && !this.stream) this.stream = setInterval(() => this.frame(), 100)
+      if (m.field === F.guiStopScreenStream) clearInterval(this.stream), (this.stream = undefined)
       if (m.field === F.guiSendInputEvent) this.input(m.body)
       // Pequeno atraso, como o rádio: ~40 ms.
       setTimeout(() => this.emit(this.reply(m.id, m.field)), 40)
