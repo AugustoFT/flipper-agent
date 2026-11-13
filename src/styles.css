@@ -136,6 +136,17 @@ button.link {
 }
 .log {
   font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+.diag {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.diag summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.85rem;
 }
 .hint {
   font-size: 0.85rem;

@@ -26,7 +26,30 @@ const CH_FLOW = '19ed82ae-ed21-4c9d-4145-228e63fe0000'
  * Filtrar por ele acha o Flipper mesmo com nome personalizado — filtrar por "Flipper…" falha
  * quando o dono renomeou o aparelho (o Momentum anuncia o nome escolhido).
  */
-const ADV_UUIDS = [0x3080, 0x3081, 0x3082, 0x3083]
+// Em texto de 128 bits: a forma numérica (0x3080) é aceita pela especificação, mas nem toda
+// implementação fora do Chrome aceita (ex.: navegadores Web BLE no iOS).
+const ADV_UUIDS = [0x3080, 0x3081, 0x3082, 0x3083].map((u) => `0000${u.toString(16)}-0000-1000-8000-00805f9b34fb`)
+
+/** Erro com a etapa em que a conexão falhou — é o que aparece no diagnóstico. */
+export class BleStepError extends Error {
+  constructor(public readonly step: string, cause: unknown) {
+    const e = cause as Error
+    super(`${step}: ${e?.name ?? 'Erro'}: ${e?.message ?? String(cause)}`)
+    this.name = e?.name ?? 'Error'
+  }
+}
+
+async function step<T>(name: string, log: (s: string) => void, fn: () => Promise<T>): Promise<T> {
+  log(`→ ${name}`)
+  try {
+    const r = await fn()
+    log(`✓ ${name}`)
+    return r
+  } catch (e) {
+    log(`✘ ${name}: ${(e as Error)?.name}: ${(e as Error)?.message}`)
+    throw new BleStepError(name, e)
+  }
+}
 
 /** Web Bluetooth não expõe o MTU. Começamos grande e caímos para 20 bytes se o celular recusar. */
 const CHUNK_SIZES = [244, 128, 20]
@@ -62,24 +85,29 @@ export class BleTransport implements Transport {
    */
   static async connect(showAll = false, log: (s: string) => void = () => {}): Promise<BleTransport> {
     if (!bleSupported()) throw new Error('Este navegador não tem Web Bluetooth.')
-    const device = await navigator.bluetooth.requestDevice(
-      showAll
-        ? { acceptAllDevices: true, optionalServices: [SERIAL_SERVICE] }
-        : {
-            // Filtros são "OU": qualquer um que bater mostra o aparelho.
-            filters: [...ADV_UUIDS.map((u) => ({ services: [u] })), { namePrefix: 'Flipper' }],
-            optionalServices: [SERIAL_SERVICE],
-          },
+    log(`navegador: ${navigator.userAgent}`)
+    const avail = await navigator.bluetooth.getAvailability?.().catch(() => undefined)
+    log(`bluetooth disponível: ${avail ?? 'desconhecido'} · modo: ${showAll ? 'todos os aparelhos' : 'filtro Flipper'}`)
+
+    const device = await step('escolher aparelho', log, () =>
+      navigator.bluetooth.requestDevice(
+        showAll
+          ? { acceptAllDevices: true, optionalServices: [SERIAL_SERVICE] }
+          : {
+              // Filtros são "OU": qualquer um que bater mostra o aparelho.
+              filters: [...ADV_UUIDS.map((u) => ({ services: [u] })), { namePrefix: 'Flipper' }],
+              optionalServices: [SERIAL_SERVICE, ...ADV_UUIDS],
+            },
+      ),
     )
-    log(`Conectando a ${device.name ?? 'dispositivo'}…`)
-    const server = await device.gatt!.connect()
-    log('Procurando o serviço serial (se pedir PIN, digite o que aparece no Flipper)…')
-    const service = await server.getPrimaryService(SERIAL_SERVICE)
-    const [rx, tx, flow] = await Promise.all([
-      service.getCharacteristic(CH_RX),
-      service.getCharacteristic(CH_TX),
-      service.getCharacteristic(CH_FLOW),
-    ])
+    log(`aparelho: "${device.name ?? '(sem nome)'}" id=${device.id}`)
+    const server = await step('conectar GATT', log, () => device.gatt!.connect())
+    log('(se o iPhone pedir PIN, digite o que aparece na tela do Flipper)')
+    const service = await step('abrir serviço serial', log, () => server.getPrimaryService(SERIAL_SERVICE))
+    // Uma operação GATT por vez: algumas pilhas BLE do iOS falham com pedidos simultâneos.
+    const rx = await step('characteristic RX', log, () => service.getCharacteristic(CH_RX))
+    const tx = await step('characteristic TX', log, () => service.getCharacteristic(CH_TX))
+    const flow = await step('characteristic fluxo', log, () => service.getCharacteristic(CH_FLOW))
     const t = new BleTransport(device, tx)
 
     device.addEventListener('gattserverdisconnected', () => t.finish('Bluetooth desconectado'))
@@ -90,9 +118,9 @@ export class BleTransport implements Transport {
     flow.addEventListener('characteristicvaluechanged', () => {
       if (flow.value) t.announce(flow.value)
     })
-    await rx.startNotifications()
-    await flow.startNotifications()
-    t.announce(await flow.readValue())
+    await step('ativar notificações RX', log, () => rx.startNotifications())
+    await step('ativar notificações fluxo', log, () => flow.startNotifications())
+    t.announce(await step('ler crédito inicial', log, () => flow.readValue()))
     log(t.credit > 0 ? `Pronto (janela de ${t.credit} bytes).` : 'Conectado, mas o RPC está fechado: desbloqueie o Flipper.')
     return t
   }

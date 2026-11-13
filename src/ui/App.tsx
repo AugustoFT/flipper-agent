@@ -22,6 +22,7 @@ export function App() {
   const [fz, setFz] = useState<FlipperClient | null>(null)
   const [conn, setConn] = useState<'off' | 'connecting' | 'on'>('off')
   const [connLog, setConnLog] = useState('')
+  const [connTrace, setConnTrace] = useState<string[]>([])
   const [battery, setBattery] = useState<string>('')
   const [items, setItems] = useState<ChatItem[]>([])
   const [input, setInput] = useState('')
@@ -46,8 +47,15 @@ export function App() {
   async function connect(showAll = settings.showAllDevices) {
     setConn('connecting')
     setConnLog('Abrindo a lista de dispositivos…')
+    const t0 = performance.now()
+    const trace: string[] = []
+    const log = (s: string) => {
+      trace.push(`${((performance.now() - t0) / 1000).toFixed(1)}s ${s}`)
+      setConnTrace([...trace])
+      if (!s.startsWith('navegador') && !s.startsWith('bluetooth')) setConnLog(s)
+    }
     try {
-      const t = await BleTransport.connect(showAll, setConnLog)
+      const t = await BleTransport.connect(showAll, log)
       const client = new FlipperClient(t)
       t.onRpcState = (open) => add({ kind: 'info', text: open ? 'RPC reaberto.' : 'O Flipper fechou o RPC (bloqueado?). Desbloqueie para continuar.' })
       t.onClose((reason) => {
@@ -65,9 +73,12 @@ export function App() {
         .then((p) => setBattery(p['charge.level'] ?? p['charge_level'] ?? ''))
         .catch(() => {})
     } catch (e) {
+      // Nunca esconder o erro: um "cancelled" pode significar lista vazia, não só o usuário fechando.
       setConn('off')
-      const msg = (e as Error).message
-      setConnLog(/cancel/i.test(msg) ? '' : `Não conectou: ${msg}`)
+      const err = e as Error
+      trace.push(`ERRO FINAL ${err.name}: ${err.message}`)
+      setConnTrace([...trace])
+      setConnLog(`Não conectou: ${err.message}\n${connectHint(err)}`)
     }
   }
 
@@ -161,6 +172,15 @@ export function App() {
             Bluetooth está permitido.
           </p>
           {connLog && <p className="log">{connLog}</p>}
+          {connTrace.length > 0 && conn !== 'connecting' && (
+            <details className="diag">
+              <summary>Diagnóstico da conexão ({connTrace.length} linhas)</summary>
+              <pre className="report">{connTrace.join('\n')}</pre>
+              <button type="button" onClick={() => copyText(connTrace.join('\n'))}>
+                Copiar diagnóstico
+              </button>
+            </details>
+          )}
           {needsKey && (
             <p className="hint">
               Para conversar com o agente, coloque uma chave grátis em <button type="button" className="link" onClick={() => setShowSettings(true)}>configurações</button>.
@@ -247,6 +267,29 @@ const LABELS: Record<string, string> = {
 }
 
 const toolLabel = (name: string) => LABELS[name] ?? name
+
+/** Dica em português para os erros mais comuns da Web Bluetooth (pelo nome do erro e pela etapa). */
+function connectHint(e: Error): string {
+  const m = e.message
+  if (e.name === 'NotFoundError' && m.startsWith('escolher aparelho'))
+    return 'A lista fechou sem aparelho escolhido. Se o Flipper não estava na lista: Bluetooth dele ligado? App oficial do Flipper fechado? Tente "Mostrar todos".'
+  if (e.name === 'SecurityError') return 'O navegador bloqueou o Bluetooth. Em Ajustes do iPhone → Bluefy, permita o Bluetooth.'
+  if (e.name === 'NetworkError' || m.startsWith('conectar GATT'))
+    return 'Achou o Flipper mas não conectou. Ele pode estar conectado a outro app/celular: feche o app oficial e, em Ajustes → Bluetooth, desconecte o Flipper.'
+  if (m.startsWith('abrir serviço serial'))
+    return 'Conectou, mas o serviço serial não apareceu. Se o Flipper estiver em modo "Bad BT"/HID, saia desse app e tente de novo.'
+  if (m.includes('characteristic') || m.includes('notificações'))
+    return 'Falhou no pareamento ou na permissão. No iPhone: Ajustes → Bluetooth → "Esquecer" o Flipper e conectar de novo, aceitando o PIN.'
+  return 'Copie o diagnóstico abaixo e mande na conversa.'
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    /* sem permissão de área de transferência: o texto continua visível para copiar à mão */
+  }
+}
 
 function describeArgs(args: Record<string, unknown>): string {
   if (Array.isArray(args.keys)) return args.keys.join(' ')
