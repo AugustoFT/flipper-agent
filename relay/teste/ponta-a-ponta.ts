@@ -175,11 +175,22 @@ check(screen.body.result?.isError === false, 'tools/call tela do Flipper', `${sc
 const bad = await mcp('tools/call', { name: 'flipper_list', arguments: { path: '/ext/../int' } })
 check(bad.body.result?.isError === true, 'regras de segurança valem pelo relay (caminho com ..)')
 
+// Limite de uso: rode o servidor com `npx wrangler dev --var LIMIT_PER_HOUR:8` e o teste com LIMITE=8.
+if (process.env.LIMITE) {
+  const max = Number(process.env.LIMITE)
+  let hit = ''
+  for (let i = 0; i < max + 2 && !hit; i++) {
+    const r = await mcp('tools/call', { name: 'flipper_power_info', arguments: {} })
+    if (/Usage limit/.test(r.body.result?.content?.[0]?.text ?? '')) hit = `bloqueou na chamada ${i + 4} desta sessão`
+  }
+  check(Boolean(hit), `limite de ${max} chamadas por hora`, hit)
+}
+
 // Celular desligado: a ferramenta responde com erro claro, sem travar.
 phone.stop()
 await sleep(500)
 const off = await mcp('tools/call', { name: 'flipper_power_info', arguments: {} })
-check(off.body.result?.isError === true && /não está conectado/.test(off.body.result?.content?.[0]?.text ?? ''), 'celular desligado → erro claro', `${off.ms} ms`)
+check(off.body.result?.isError === true && /not connected/.test(off.body.result?.content?.[0]?.text ?? ''), 'celular desligado → erro claro', `${off.ms} ms`)
 
 await fz.stopScreen().catch(() => {})
 await transport.send(encodeMain(999, F.stopSession, () => {}))

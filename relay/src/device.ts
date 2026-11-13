@@ -10,6 +10,10 @@ import type { FromDevice, RelayToolResult, ToDevice } from '../../src/relay-prot
 export interface Env {
   DEVICE: DurableObjectNamespace<Device>
   OAUTH_KV: KVNamespace
+  /** Limites de uso (wrangler.jsonc → vars). Ver `limits()` em index.ts. */
+  LIMIT_PER_HOUR?: string
+  LIMIT_PER_DAY?: string
+  GLOBAL_PER_DAY?: string
 }
 
 /** Resposta de `ask`: o que o celular mandou, ou por que não mandou. */
@@ -17,6 +21,17 @@ export type AskOutcome<T> = { ok: true; value: T } | { ok: false; reason: 'offli
 
 const CALL_TIMEOUT_MS = 11 * 60_000 // passagem de bastão espera até 10 min no celular
 const APPROVE_TIMEOUT_MS = 90_000
+
+/** Nome do Durable Object que conta o uso do servidor inteiro (tem "_", que nenhum código tem). */
+export const GLOBAL_COUNTER = '_global'
+
+interface Usage {
+  /** Hora e dia (desde 1970) da contagem atual, e quantas chamadas em cada um. */
+  h: number
+  hc: number
+  d: number
+  dc: number
+}
 
 interface Attachment {
   authed: boolean
@@ -39,6 +54,25 @@ export class Device extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server)
     server.serializeAttachment({ authed: false } satisfies Attachment)
     return new Response(null, { status: 101, webSocket: client })
+  }
+
+  /**
+   * Conta uma chamada de ferramenta e diz se ainda cabe nos limites. O Durable Object roda uma
+   * requisição por vez, então o contador não tem corrida. O mesmo método conta o uso do servidor
+   * inteiro, no objeto de nome GLOBAL_COUNTER.
+   */
+  async consume(perHour: number, perDay: number): Promise<boolean> {
+    const now = Date.now()
+    const h = Math.floor(now / 3_600_000)
+    const d = Math.floor(now / 86_400_000)
+    const u = (await this.ctx.storage.get<Usage>('usage')) ?? { h, hc: 0, d, dc: 0 }
+    if (u.h !== h) Object.assign(u, { h, hc: 0 })
+    if (u.d !== d) Object.assign(u, { d, dc: 0 })
+    if (u.hc >= perHour || u.dc >= perDay) return false
+    u.hc++
+    u.dc++
+    await this.ctx.storage.put('usage', u)
+    return true
   }
 
   /** O celular está conectado e autenticado agora? */

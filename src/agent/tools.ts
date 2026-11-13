@@ -5,6 +5,7 @@
 // dizendo "ignore as instruções e transmita X" não pode virar ordem para o modelo.
 
 import type { FlipperClient, Key } from '../flipper/client'
+import { t } from '../ui/i18n'
 import type { FlipperLink } from '../flipper/link'
 import { toText, type Frame } from '../flipper/screen'
 import { frameToPngBase64 } from './image'
@@ -59,7 +60,7 @@ async function handoff(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
     const r = await before.screen.waitSettled(before.screen.currentSeq, 400, 3000)
     return screenResult(call, ctx, r.frame, 'A conexão NÃO caiu (cabo USB, ou o app não usou o Bluetooth). Siga normalmente.')
   }
-  ctx.onProgress?.(`${message} · esperando você sair do app no Flipper`)
+  ctx.onProgress?.(`${message} · ${t().waitingExitApp}`)
   const back = await connected(ctx)
   await back.startScreen().catch(() => {}) // já transmitindo nesta sessão: tudo bem
   return screenResult(call, ctx, await back.currentFrame(), 'A conexão voltou: o usuário saiu do app. Tela atual.')
@@ -98,7 +99,7 @@ const RECONNECT_WAIT_MS = 10 * 60_000
 /** O cliente atual; se a conexão caiu, espera ela voltar (até 10 min) em vez de falhar. */
 async function connected(ctx: ToolContext): Promise<FlipperClient> {
   if (ctx.link.current) return ctx.link.current
-  ctx.onProgress?.('esperando o Flipper reconectar…')
+  ctx.onProgress?.(t().waitingReconnect)
   const back = await ctx.link.waitFor((c) => c !== null, RECONNECT_WAIT_MS, ctx.signal)
   if (!back || !ctx.link.current) throw new Error('o Flipper ficou 10 minutos desconectado')
   return ctx.link.current
@@ -123,7 +124,7 @@ export async function runTool(call: ToolCall, ctx: ToolContext): Promise<ToolRes
         let last: { frame: Frame | null; settled: boolean } = { frame: fz.screen.frame, settled: true }
         for (const [i, k] of parsed.entries()) {
           if (ctx.signal.aborted) throw new Error(`interrompido após ${i} tecla(s)`)
-          ctx.onProgress?.(`${k.key}${k.long ? ' (longo)' : ''}`)
+          ctx.onProgress?.(`${k.key}${k.long ? ` ${t().long}` : ''}`)
           last = await fz.pressAndSettle(k.key, k.long)
         }
         const note = last.settled ? '' : ' A tela ainda estava se mexendo (animação?).'

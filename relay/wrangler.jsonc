@@ -12,6 +12,9 @@
   "durable_objects": {
     "bindings": [{ "name": "DEVICE", "class_name": "Device" }]
   },
+  // Limites de chamadas de ferramenta (por aparelho e do servidor inteiro). No seu próprio relay,
+  // ajuste à vontade: o plano grátis da Cloudflare aguenta cerca de 100 mil requisições por dia.
+  "vars": { "LIMIT_PER_HOUR": "200", "LIMIT_PER_DAY": "1000", "GLOBAL_PER_DAY": "20000" },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Device"] }],
   "observability": { "enabled": true }
 }

@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import type { FlipperClient, Key } from '../flipper/client'
 import { HEIGHT, WIDTH } from '../flipper/screen'
+import { t } from './i18n'
 import { useLcd } from './useLcd'
 
 /**
@@ -9,24 +10,30 @@ import { useLcd } from './useLcd'
  * As teclas imitam o botão físico: PRESS ao encostar, LONG aos 0,5 s, REPEAT segurando (rola listas
  * rápido), SHORT+RELEASE ao soltar.
  */
-export function Device({ fz, locked }: { fz: FlipperClient; locked: boolean }) {
+export function Device({ fz, locked, paused, onWake }: { fz: FlipperClient; locked: boolean; paused: boolean; onWake: () => void }) {
+  const L = t()
   const canvas = useRef<HTMLCanvasElement>(null)
   useLcd(fz, canvas, '#1b1b1b', '#ff8c29')
 
   return (
-    <section className="device" aria-label="Flipper">
-      <div className="bezel">
-        <canvas ref={canvas} width={WIDTH} height={HEIGHT} className="lcd" role="img" aria-label="Tela do Flipper ao vivo" />
+    <section className="device" aria-label={L.device}>
+      <div className={`bezel${paused ? ' paused' : ''}`}>
+        <canvas ref={canvas} width={WIDTH} height={HEIGHT} className="lcd" role="img" aria-label={L.liveScreen} />
+        {paused && (
+          <button type="button" className="lcd-paused" onClick={onWake} aria-label={L.resume}>
+            <span>{L.paused}</span>
+          </button>
+        )}
       </div>
-      <div className="controls" aria-label="Controle">
-        <PadKey fz={fz} k="UP" label="Para cima" locked={locked} />
-        <PadKey fz={fz} k="LEFT" label="Esquerda" locked={locked} />
-        <PadKey fz={fz} k="OK" label="OK" locked={locked} />
-        <PadKey fz={fz} k="RIGHT" label="Direita" locked={locked} />
-        <PadKey fz={fz} k="DOWN" label="Para baixo" locked={locked} />
-        <PadKey fz={fz} k="BACK" label="Voltar" locked={locked} />
+      <div className="controls" aria-label={L.controls}>
+        <PadKey fz={fz} k="UP" label={L.keyUp} locked={locked} onWake={onWake} />
+        <PadKey fz={fz} k="LEFT" label={L.keyLeft} locked={locked} onWake={onWake} />
+        <PadKey fz={fz} k="OK" label="OK" locked={locked} onWake={onWake} />
+        <PadKey fz={fz} k="RIGHT" label={L.keyRight} locked={locked} onWake={onWake} />
+        <PadKey fz={fz} k="DOWN" label={L.keyDown} locked={locked} onWake={onWake} />
+        <PadKey fz={fz} k="BACK" label={L.keyBack} locked={locked} onWake={onWake} />
       </div>
-      {locked && <p className="device-note">O agente está usando o Flipper. Toque em Parar para assumir.</p>}
+      {locked && <p className="device-note">{L.agentUsing}</p>}
     </section>
   )
 }
@@ -34,7 +41,7 @@ export function Device({ fz, locked }: { fz: FlipperClient; locked: boolean }) {
 const LONG_MS = 500
 const REPEAT_MS = 150
 
-function PadKey({ fz, k, label, locked }: { fz: FlipperClient; k: Key; label: string; locked: boolean }) {
+function PadKey({ fz, k, label, locked, onWake }: { fz: FlipperClient; k: Key; label: string; locked: boolean; onWake: () => void }) {
   const st = useRef<{ long: boolean; timer: number; rep: number; down: boolean }>({ long: false, timer: 0, rep: 0, down: false })
 
   const release = (cancelled: boolean) => {
@@ -60,6 +67,7 @@ function PadKey({ fz, k, label, locked }: { fz: FlipperClient; k: Key; label: st
         s.down = true
         s.long = false
         navigator.vibrate?.(8)
+        onWake()
         fz.inputEvent(k, 'PRESS')
         s.timer = window.setTimeout(() => {
           s.long = true

@@ -5,7 +5,7 @@
 import type { ToolSpec } from './types'
 
 export const SYSTEM_PROMPT = `Você é um agente que opera um Flipper Zero (firmware Momentum) a pedido do usuário, conectado pelo Bluetooth do celular dele.
-Responda sempre em português do Brasil, curto e direto.
+Responda no idioma em que o usuário escreveu (em dúvida, português do Brasil), curto e direto.
 
 Como operar:
 - Você usa o Flipper como uma pessoa com controle remoto: olhe a tela (flipper_screen), aperte poucas teclas (flipper_press), olhe de novo.

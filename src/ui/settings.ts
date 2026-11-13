@@ -2,6 +2,7 @@
 // A chave da API nunca sai do celular, a não ser para o próprio provedor.
 
 import type { ProviderId } from '../agent/types'
+import type { LangSetting } from './i18n'
 
 export interface Settings {
   provider: ProviderId
@@ -15,6 +16,10 @@ export interface Settings {
   relayOn: boolean
   /** Endereço do servidor do relay (Cloudflare Worker). */
   relayUrl: string
+  /** Idioma da interface. */
+  lang: LangSetting
+  /** Guardar a conversa no aparelho para continuar depois. */
+  saveChat: boolean
 }
 
 /** Servidor do relay publicado (Cloudflare Worker). Dá para trocar nas configurações. */
@@ -30,6 +35,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showAllDevices: false,
   relayOn: false,
   relayUrl: RELAY_URL,
+  lang: 'auto',
+  saveChat: true,
 }
 
 const STORAGE_KEY = 'flipper-agent:settings'

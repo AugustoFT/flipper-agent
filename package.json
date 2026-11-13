@@ -3,7 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Agente de IA que controla o Flipper Zero direto do celular, via Bluetooth (BLE).",
+  "description": "AI agent that controls a Flipper Zero from your phone, over Bluetooth or USB.",
+  "license": "MIT",
   "scripts": {
     "dev": "vite --host",
     "build": "tsc -b && vite build",

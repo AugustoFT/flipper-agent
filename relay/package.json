@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "publicar": "node scripts/publicar.mjs",
     "typecheck": "tsc --noEmit",
     "teste": "cd .. && npx tsx relay/teste/ponta-a-ponta.ts"
   },

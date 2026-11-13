@@ -8,12 +8,16 @@ import { FlipperLink } from '../flipper/link'
 import { UsbTransport, usbKind } from '../flipper/usb'
 import { loadIdentity, RelayClient, resetIdentity, type RelayState } from '../relay/client'
 import { BackgroundTest } from './BackgroundTest'
+import { clearChat, loadChat, saveChat } from './chatStore'
+import { setLang, t } from './i18n'
 import { ApproveSheet, RelayBar } from './RelayBar'
 import { Device } from './Screen'
 import { loadSettings, saveSettings, type Settings } from './settings'
 import { SettingsPanel } from './SettingsPanel'
+import { HelpSheet, SafetySheet, safetySeen } from './Sheets'
 import { useBottomGuard } from './useBottomGuard'
 import { useKeyboard } from './useKeyboard'
+import { useScreenIdle } from './useScreenIdle'
 
 type ChatItem =
   | { kind: 'user'; text: string }
@@ -21,10 +25,24 @@ type ChatItem =
   | { kind: 'tool'; id: string; label: string; detail: string; image?: string; error?: boolean; running: boolean }
   | { kind: 'info'; text: string }
 
+/** Conversa guardada da visita anterior (lida uma vez, ao abrir). */
+const saved = loadSettings().saveChat ? loadChat<ChatItem>() : null
+
+/** O teste de segundo plano é ferramenta de quem mantém o app: só aparece com ?diag no endereço. */
+const DIAG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('diag')
+/** ?demo: Flipper simulado, para conhecer o app sem aparelho (sem aviso inicial e com os pedidos prontos à mostra). */
+const DEMO = typeof location !== 'undefined' && new URLSearchParams(location.search).has('demo')
+
 export function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings)
+  setLang(settings.lang) // antes de qualquer texto: os componentes leem t() ao desenhar
+  const L = t()
   const [showSettings, setShowSettings] = useState(false)
   const [showBgTest, setShowBgTest] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
+  const [showSafety, setShowSafety] = useState(() => !DEMO && !safetySeen())
+  /** Chamadas do Claude em andamento: enquanto houver, a tela não pausa. */
+  const [claudeRunning, setClaudeRunning] = useState(0)
   const [fz, setFz] = useState<FlipperClient | null>(null)
   const [conn, setConn] = useState<'off' | 'connecting' | 'reconnecting' | 'on'>('off')
   /** Por onde está (ou estava) a conexão: muda a explicação da reconexão. */
@@ -33,10 +51,17 @@ export function App() {
   const [connTrace, setConnTrace] = useState<string[]>([])
   const [battery, setBattery] = useState<string>('')
   const [latency, setLatency] = useState<number | null>(null)
-  const [items, setItems] = useState<ChatItem[]>([])
+  const [items, setItems] = useState<ChatItem[]>(() =>
+    saved
+      ? [
+          ...saved.items.map((it) => (it.kind === 'tool' ? { ...it, running: false } : it)),
+          { kind: 'info', text: saved.trimmed ? `${t().restored} ${t().historyTrimmed}` : t().restored },
+        ]
+      : [],
+  )
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  const history = useRef<Msg[]>([])
+  const history = useRef<Msg[]>(saved?.history ?? [])
   const abort = useRef<AbortController | null>(null)
   const chatRef = useRef<HTMLElement>(null)
   /** Conexão atual para o agente: troca a cada reconexão sem interromper a tarefa. */
@@ -48,12 +73,22 @@ export function App() {
   const [approval, setApproval] = useState<{ client: string; host: string; answer: (ok: boolean) => void } | null>(null)
   const typing = useKeyboard()
   useBottomGuard(typing)
+  const idle = useScreenIdle(fz, busy || claudeRunning > 0)
   /** Ficha da reconexão em andamento; `stop` interrompe o laço. */
   const recon = useRef<{ stop: boolean } | null>(null)
 
   useEffect(() => {
     saveSettings(settings)
   }, [settings])
+
+  // Guarda a conversa quando ela muda (e só quando o agente não está no meio de um passo).
+  useEffect(() => {
+    if (!settings.saveChat) {
+      clearChat()
+      return
+    }
+    if (!busy) saveChat(items.filter((it) => it.kind !== 'info'), history.current)
+  }, [items, busy, settings.saveChat])
 
   // ?demo na URL: conecta num Flipper simulado (conhecer o app sem aparelho, revisar o design).
   useEffect(() => {
@@ -110,10 +145,14 @@ export function App() {
           navigator.vibrate?.([30, 60, 30])
           setApproval({ client: clientName, host, answer: (ok) => (setApproval(null), resolve(ok)) })
         }),
-      onToolStart: (c) =>
-        add({ kind: 'tool', id: `claude-${c.id}`, label: `Claude ${toolLabel(c.name)}`, detail: describeArgs(c.args), running: true }),
-      onToolEnd: (r) =>
-        patchTool(`claude-${r.id}`, { running: false, image: r.image, error: r.isError, detail: r.isError ? r.text : summarize(r.text) }),
+      onToolStart: (c) => {
+        setClaudeRunning((n) => n + 1)
+        add({ kind: 'tool', id: `claude-${c.id}`, label: `Claude ${toolLabel(c.name)}`, detail: describeArgs(c.args), running: true })
+      },
+      onToolEnd: (r) => {
+        setClaudeRunning((n) => Math.max(0, n - 1))
+        patchTool(`claude-${r.id}`, { running: false, image: r.image, error: r.isError, detail: r.isError ? r.text : summarize(r.text) })
+      },
     })
     client.start()
     return () => client.stop()
@@ -130,13 +169,13 @@ export function App() {
     const client = new FlipperClient(t)
     setVia(t instanceof UsbTransport ? 'usb' : 'ble')
     if (t instanceof BleTransport)
-      t.onRpcState = (open) => add({ kind: 'info', text: open ? 'RPC reaberto.' : 'O Flipper fechou o RPC (bloqueado?). Desbloqueie para continuar.' })
+      t.onRpcState = (open) => add({ kind: 'info', text: open ? L.rpcReopened : L.rpcClosed })
     t.onClose((reason) => {
       link.set(null)
       setFz(null)
       setLatency(null)
       // O agente NÃO é parado: as ferramentas dele esperam a reconexão (passagem de bastão).
-      add({ kind: 'info', text: `Conexão caiu (${reason}). Tentando reconectar…` })
+      add({ kind: 'info', text: L.dropped(reason) })
       reconnectLoop(reopen)
     })
     link.set(client)
@@ -161,7 +200,7 @@ export function App() {
     setConn('reconnecting')
     const started = Date.now()
     for (let attempt = 1; !token.stop && Date.now() - started < 10 * 60_000; attempt++) {
-      setConnLog(`Tentativa ${attempt}…`)
+      setConnLog(L.attempt(attempt))
       try {
         const t = await reopen()
         if (token.stop) {
@@ -170,7 +209,7 @@ export function App() {
         }
         recon.current = null
         attach(t, reopen)
-        add({ kind: 'info', text: `Reconectado a ${t.name}.` })
+        add({ kind: 'info', text: L.reconnected(t.name) })
         return
       } catch {
         await new Promise((r) => setTimeout(r, Math.min(1000 * attempt, 5000)))
@@ -181,7 +220,7 @@ export function App() {
       abort.current?.abort()
       setConn('off')
       setConnLog('')
-      add({ kind: 'info', text: 'Não reconectou em 10 minutos. Toque em Conectar Flipper.' })
+      add({ kind: 'info', text: t().gaveUp })
     }
   }
 
@@ -195,7 +234,7 @@ export function App() {
 
   async function connect(showAll = settings.showAllDevices) {
     setConn('connecting')
-    setConnLog('Abrindo a lista de dispositivos…')
+    setConnLog(L.openingList)
     const t0 = performance.now()
     const trace: string[] = []
     const log = (s: string) => {
@@ -207,14 +246,14 @@ export function App() {
       const t = await BleTransport.connect(showAll, log)
       const device = t.bluetoothDevice
       attach(t, () => BleTransport.reconnect(device))
-      add({ kind: 'info', text: `Conectado a ${t.name}.` })
+      add({ kind: 'info', text: L.connected(t.name) })
     } catch (e) {
       // Nunca esconder o erro: um "cancelled" pode significar lista vazia, não só o usuário fechando.
       setConn('off')
       const err = e as Error
       trace.push(`ERRO FINAL ${err.name}: ${err.message}`)
       setConnTrace([...trace])
-      setConnLog(`Não conectou: ${err.message}
+      setConnLog(`${L.notConnected(err.message)}
 ${connectHint(err)}`)
     }
   }
@@ -224,7 +263,7 @@ ${connectHint(err)}`)
     const kind = usbKind()
     if (!kind) return
     setConn('connecting')
-    setConnLog('Abrindo a lista de portas USB…')
+    setConnLog(L.openingPorts)
     const t0 = performance.now()
     const trace: string[] = [`navegador: ${navigator.userAgent}`, `cabo via ${kind === 'serial' ? 'Web Serial' : 'WebUSB'}`]
     const log = (s: string) => {
@@ -235,7 +274,7 @@ ${connectHint(err)}`)
     try {
       const t = await UsbTransport.connect(kind, log)
       attach(t, () => UsbTransport.reconnect(kind))
-      add({ kind: 'info', text: `Conectado a ${t.name}. O Bluetooth do Flipper está livre para Bad KB e Remote.` })
+      add({ kind: 'info', text: L.connectedUsb(t.name) })
     } catch (e) {
       setConn('off')
       const err = e as Error
@@ -243,8 +282,8 @@ ${connectHint(err)}`)
       setConnTrace([...trace])
       setConnLog(
         err.name === 'NotFoundError'
-          ? 'Nenhuma porta escolhida. O Flipper está ligado no cabo e desbloqueado? No Android, use um cabo OTG.'
-          : `Não conectou: ${err.message}`,
+          ? L.noPort
+          : L.notConnected(err.message),
       )
     }
   }
@@ -280,7 +319,7 @@ ${connectHint(err)}`)
       })
     } catch (e) {
       const err = e as Error
-      add({ kind: 'info', text: err.name === 'AbortError' ? 'Parado.' : `Erro: ${err.message}` })
+      add({ kind: 'info', text: err.name === 'AbortError' ? t().stopped : t().error(err.message) })
     } finally {
       setBusy(false)
       abort.current = null
@@ -290,6 +329,7 @@ ${connectHint(err)}`)
   function newChat() {
     history.current = []
     setItems([])
+    clearChat()
   }
 
   const noBle = !bleSupported()
@@ -301,21 +341,30 @@ ${connectHint(err)}`)
       <header className="status">
         <span className={`dot ${conn === 'reconnecting' ? 'connecting' : conn}`} aria-hidden="true" />
         <span className="device-name">
-          {conn === 'on' ? fz?.name : conn === 'connecting' ? 'Conectando' : conn === 'reconnecting' ? 'Reconectando' : 'Sem Flipper'}
+          {conn === 'on' ? fz?.name : conn === 'connecting' ? L.connecting : conn === 'reconnecting' ? L.reconnecting : L.noFlipper}
         </span>
         {conn === 'on' && (
           <span className="readouts">
-            {latency !== null && <span title="Latência da conexão (ida e volta)">{latency} ms</span>}
-            {battery && <span title="Bateria do Flipper">{battery}%</span>}
+            {latency !== null && <span title={L.latencyTitle}>{latency} ms</span>}
+            {battery && <span title={L.batteryTitle}>{battery}%</span>}
           </span>
         )}
         <span className="spacer" />
-        <button type="button" className="icon-btn" onClick={() => setShowBgTest(true)} aria-label="Teste de segundo plano">
+        {DIAG && (
+          <button type="button" className="icon-btn" onClick={() => setShowBgTest(true)} aria-label="Teste de segundo plano">
+            <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+              <path d="M7 2h6M8 2v5L3.5 15a2 2 0 0 0 1.7 3h9.6a2 2 0 0 0 1.7-3L12 7V2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
+        <button type="button" className="icon-btn" onClick={() => setShowHelp(true)} aria-label={L.help}>
           <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
-            <path d="M7 2h6M8 2v5L3.5 15a2 2 0 0 0 1.7 3h9.6a2 2 0 0 0 1.7-3L12 7V2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+            <circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M7.8 7.8a2.3 2.3 0 1 1 3.2 2.1c-.6.3-1 .8-1 1.5v.4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            <circle cx="10" cy="14.6" r="1" fill="currentColor" />
           </svg>
         </button>
-        <button type="button" className="icon-btn" onClick={() => setShowSettings(true)} aria-label="Configurações">
+        <button type="button" className="icon-btn" onClick={() => setShowSettings(true)} aria-label={L.settings}>
           <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
             <path d="M3 6h9m4 0h1M3 14h1m4 0h9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
             <circle cx="14" cy="6" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
@@ -329,88 +378,91 @@ ${connectHint(err)}`)
       {noBle && !cable ? (
         <section className="onboard">
           <div className="bezel">
-            <div className="lcd lcd-text">Sem Bluetooth neste navegador</div>
+            <div className="lcd lcd-text">{L.noBluetooth}</div>
           </div>
           <dl className="where">
             <dt>iPhone</dt>
-            <dd>Instale o navegador Bluefy (grátis na App Store) e abra este mesmo endereço nele.</dd>
+            <dd>{L.whereIphone}</dd>
             <dt>Android</dt>
-            <dd>Abra no Chrome.</dd>
-            <dt>Computador</dt>
-            <dd>Chrome ou Edge.</dd>
+            <dd>{L.whereAndroid}</dd>
+            <dt>{L.computer}</dt>
+            <dd>{L.wherePc}</dd>
           </dl>
         </section>
       ) : !fz && conn === 'reconnecting' ? (
         <section className="onboard">
           <div className="bezel">
-            <div className="lcd lcd-text">Reconectando…</div>
+            <div className="lcd lcd-text">{L.reconnectingScreen}</div>
           </div>
-          <p className="hint">
-            {via === 'usb'
-              ? 'O cabo foi desconectado. Encaixe de novo e a conexão volta sozinha.'
-              : 'Se você abriu um app de Bluetooth no Flipper (Remote, Bad KB), ele trocou o rádio para modo teclado e a conexão caiu. Saia do app no Flipper e a conexão volta sozinha.'}
-          </p>
+          <p className="hint">{via === 'usb' ? L.reconnectUsb : L.reconnectBle}</p>
           {connLog && <p className="log">{connLog}</p>}
           <button type="button" className="btn quiet wide" onClick={stopReconnect}>
-            Parar de tentar
+            {L.stopTrying}
           </button>
         </section>
       ) : !fz ? (
         <section className="onboard">
           <div className="bezel">
-            <div className="lcd lcd-text">{conn === 'connecting' ? 'Procurando…' : 'Aguardando Flipper'}</div>
+            <div className="lcd lcd-text">{conn === 'connecting' ? L.searching : L.waiting}</div>
           </div>
           {!noBle && (
             <button type="button" className="btn primary wide" onClick={() => connect()} disabled={conn === 'connecting'}>
-              {conn === 'connecting' ? 'Conectando…' : 'Conectar por Bluetooth'}
+              {conn === 'connecting' ? L.connectingBtn : L.connectBle}
             </button>
           )}
           {cable && (
             <button type="button" className={`btn ${noBle ? 'primary' : 'quiet'} wide`} onClick={connectUsb} disabled={conn === 'connecting'}>
-              Conectar pelo cabo USB
+              {L.connectUsb}
             </button>
           )}
           {!noBle && (
             <button type="button" className="link small" onClick={() => connect(true)} disabled={conn === 'connecting'}>
-              Não aparece? Mostrar todos os aparelhos Bluetooth
+              {L.showAllBle}
             </button>
           )}
           <p className="hint">
-            {!noBle &&
-              'Deixe o Bluetooth do Flipper ligado e na tela inicial. Feche o app oficial do Flipper: ele prende a conexão. Na primeira vez, digite o PIN que aparece no Flipper.'}
-            {cable &&
-              ` Pelo cabo${cable === 'webusb' ? ' (OTG)' : ''}, o Bluetooth do Flipper fica livre: Bad KB e Bluetooth Remote funcionam sem derrubar a conexão.`}
+            {!noBle && L.bleHint}
+            {cable && L.cableHint(cable === 'webusb')}
           </p>
           {connLog && <p className="log">{connLog}</p>}
           {connTrace.length > 0 && conn !== 'connecting' && (
             <details className="diag">
-              <summary>Diagnóstico da conexão ({connTrace.length} linhas)</summary>
+              <summary>{L.diagSummary(connTrace.length)}</summary>
               <pre className="report">{connTrace.join('\n')}</pre>
               <button type="button" className="btn quiet" onClick={() => copyText(connTrace.join('\n'))}>
-                Copiar diagnóstico
+                {L.copyDiag}
               </button>
             </details>
           )}
         </section>
       ) : (
-        <Device fz={fz} locked={busy} />
+        <Device fz={fz} locked={busy} paused={idle.paused} onWake={idle.wake} />
       )}
 
       <main className="chat" aria-live="polite" ref={chatRef}>
         {items.length === 0 && fz && (
           <div className="chat-empty">
             {settings.relayOn && settings.relayUrl ? (
-              <p>Modo Claude ligado: converse pelo app do Claude. O que ele fizer no Flipper aparece aqui.</p>
-            ) : needsKey ? (
+              <p>{L.claudeEmpty}</p>
+            ) : needsKey && !DEMO ? (
               <p>
-                Para conversar com o agente, escolha uma IA em{' '}
+                {L.needKeyA}
                 <button type="button" className="link" onClick={() => setShowSettings(true)}>
-                  configurações
+                  {L.needKeyLink}
                 </button>
-                . O Gemini tem plano grátis.
+                {L.needKeyB}
               </p>
             ) : (
-              <p>Peça em português: “abra o Infravermelho e me diga quais controles eu tenho”.</p>
+              <>
+                <p>{L.tryOne}</p>
+                <div className="recipes">
+                  {L.recipes.map((r) => (
+                    <button key={r} type="button" className="recipe" onClick={() => setInput(r)}>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
           </div>
         )}
@@ -422,15 +474,15 @@ ${connectHint(err)}`)
       <footer className="composer">
         {items.length > 0 && !busy && (
           <button type="button" className="link small" onClick={newChat}>
-            Nova conversa
+            {L.newChat}
           </button>
         )}
         <div className="compose-row">
           <textarea
             rows={1}
             value={input}
-            aria-label="Mensagem para o agente"
-            placeholder={fz ? 'Peça algo ao agente' : 'Conecte o Flipper primeiro'}
+            aria-label={L.msgLabel}
+            placeholder={fz ? L.askPlaceholder : L.connectFirst}
             disabled={!fz}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -441,13 +493,13 @@ ${connectHint(err)}`)
             }}
           />
           {busy ? (
-            <button type="button" className="send stop" onClick={() => abort.current?.abort()} aria-label="Parar o agente">
+            <button type="button" className="send stop" onClick={() => abort.current?.abort()} aria-label={L.stopAgent}>
               <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
                 <rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor" />
               </svg>
             </button>
           ) : (
-            <button type="button" className="send" onClick={send} disabled={!fz || !input.trim()} aria-label="Enviar">
+            <button type="button" className="send" onClick={send} disabled={!fz || !input.trim()} aria-label={L.send}>
               <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
                 <path d="M10 16V4m0 0-5 5m5-5 5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
@@ -466,6 +518,16 @@ ${connectHint(err)}`)
           onResetCode={() => setRelayId(resetIdentity())}
         />
       )}
+      {showHelp && (
+        <HelpSheet
+          onClose={() => setShowHelp(false)}
+          onSafety={() => {
+            setShowHelp(false)
+            setShowSafety(true)
+          }}
+        />
+      )}
+      {showSafety && <SafetySheet onClose={() => setShowSafety(false)} />}
       {approval && <ApproveSheet client={approval.client} host={approval.host} onAnswer={approval.answer} />}
     </div>
   )
@@ -480,43 +542,23 @@ function ChatRow({ it }: { it: ChatItem }) {
       <p>
         <span className="tool-name">{it.label}</span> {it.detail}
       </p>
-      {it.image && <img src={`data:image/png;base64,${it.image}`} alt="Tela do Flipper vista pelo agente" />}
+      {it.image && <img src={`data:image/png;base64,${it.image}`} alt={t().agentScreenAlt} />}
     </div>
   )
 }
 
-const LABELS: Record<string, string> = {
-  flipper_screen: 'olhou a tela',
-  flipper_press: 'apertou',
-  flipper_wait: 'esperou',
-  flipper_app_start: 'abriu app',
-  flipper_app_exit: 'fechou app',
-  flipper_list: 'listou',
-  flipper_read: 'leu',
-  flipper_write: 'gravou',
-  flipper_mkdir: 'criou pasta',
-  flipper_delete: 'apagou',
-  flipper_rename: 'renomeou',
-  flipper_device_info: 'info do aparelho',
-  flipper_power_info: 'bateria',
-  flipper_handoff: 'passou o bastão',
-}
+const toolLabel = (name: string) => t().toolLabels[name] ?? name
 
-const toolLabel = (name: string) => LABELS[name] ?? name
-
-/** Dica em português para os erros mais comuns da Web Bluetooth (pelo nome do erro e pela etapa). */
+/** Dica para os erros mais comuns da Web Bluetooth (pelo nome do erro e pela etapa). */
 function connectHint(e: Error): string {
+  const L = t()
   const m = e.message
-  if (e.name === 'NotFoundError' && m.startsWith('escolher aparelho'))
-    return 'A lista fechou sem aparelho escolhido. Se o Flipper não estava na lista: Bluetooth dele ligado? App oficial do Flipper fechado? Tente "Mostrar todos".'
-  if (e.name === 'SecurityError') return 'O navegador bloqueou o Bluetooth. Em Ajustes do iPhone → Bluefy, permita o Bluetooth.'
-  if (e.name === 'NetworkError' || m.startsWith('conectar GATT'))
-    return 'Achou o Flipper mas não conectou. Ele pode estar conectado a outro app/celular: feche o app oficial e, em Ajustes → Bluetooth, desconecte o Flipper.'
-  if (m.startsWith('abrir serviço serial'))
-    return 'Conectou, mas o serviço serial não apareceu. Se o Flipper estiver em modo "Bad BT"/HID, saia desse app e tente de novo.'
-  if (m.includes('characteristic') || m.includes('notificações'))
-    return 'Falhou no pareamento ou na permissão. No iPhone: Ajustes → Bluetooth → "Esquecer" o Flipper e conectar de novo, aceitando o PIN.'
-  return 'Copie o diagnóstico abaixo e mande na conversa.'
+  if (e.name === 'NotFoundError' && m.startsWith('escolher aparelho')) return L.hintClosedList
+  if (e.name === 'SecurityError') return L.hintSecurity
+  if (e.name === 'NetworkError' || m.startsWith('conectar GATT')) return L.hintGatt
+  if (m.startsWith('abrir serviço serial')) return L.hintSerial
+  if (m.includes('characteristic') || m.includes('notificações')) return L.hintPairing
+  return L.hintOther
 }
 
 async function copyText(text: string) {
@@ -533,7 +575,7 @@ function describeArgs(args: Record<string, unknown>): string {
     return args.keys
       .map((k) => {
         const [name, mod] = String(k).toUpperCase().split(':')
-        return `${sym[name] ?? name}${mod === 'LONG' ? '(longo)' : ''}`
+        return `${sym[name] ?? name}${mod === 'LONG' ? t().long : ''}`
       })
       .join(' ')
   }

@@ -1,78 +1,168 @@
 # Flipper Agent
 
-Agente de IA que controla o Flipper Zero **direto do celular, pelo Bluetooth**. Sem PC, sem servidor,
-sem app na loja. É uma página web (PWA): o celular fala BLE com o Flipper e chama o modelo de IA
-direto do navegador.
+An AI agent that controls your Flipper Zero **from your phone, over Bluetooth**. No PC, no app
+store, no server of your own: it's a web page. The phone talks BLE to the Flipper and calls the AI
+model straight from the browser.
+
+**Try it:** <https://augustoft.github.io/flipper-agent/> · **No Flipper?** Open the
+[demo](https://augustoft.github.io/flipper-agent/?demo) with a simulated one.
+
+<p align="center"><img src="docs/screenshot.png" width="360" alt="Flipper Agent: live Flipper screen, a small remote and suggested requests"></p>
 
 ```
-Flipper Zero  ⇄  BLE  ⇄  celular (esta página)  ⇄  HTTPS  ⇄  Gemini / OpenRouter
+Flipper Zero  ⇄  BLE or USB  ⇄  phone (this page)  ⇄  HTTPS  ⇄  Gemini / OpenRouter / any OpenAI-compatible API
+                                                   ⇄  relay  ⇄  Claude (no API key, via MCP connector)
 ```
 
-## Onde roda
+[Português](README.pt-BR.md)
 
-| Aparelho | Navegador |
-|---|---|
-| iPhone | **Bluefy** (grátis na App Store). O Safari não tem Web Bluetooth. |
-| Android | Chrome |
-| PC | Chrome ou Edge |
+## What it does
 
-Cabo (Lightning/USB-C) no iPhone **não** serve para controle: o iOS não deixa apps comuns falarem
-com dispositivos seriais USB. Só dá energia.
+Ask in plain language — "open Infrared and tell me which remotes I have saved", "what's on the SD
+card?", "open NFC to read a card" — and the agent looks at the screen, presses keys, opens apps and
+reads or writes files until it's done. You watch the live screen while it works, and can take over
+with the small remote at any time.
 
-## Modelo de IA (grátis)
+- Sees the screen (as an image, or as text art for text-only models)
+- Presses keys (short/long), opens apps by name, exits apps
+- Lists, reads, writes, renames and deletes files on the SD card; device and battery info
+- **Hand-off** for apps that take over the Flipper's Bluetooth (Bad KB, Bluetooth Remote): it gets
+  everything ready, tells you what to do on the Flipper, and waits for the connection to come back
+- Reconnects by itself when the link drops; the agent's task keeps going
+- Conversation saved on the device; Portuguese and English interface
 
-- **Google Gemini** — chave em <https://aistudio.google.com/apikey>. Padrão: `gemini-flash-latest`.
-- **OpenRouter** — chave em <https://openrouter.ai/keys>; use modelos com sufixo `:free`
-  (botão "Listar" mostra só os que suportam ferramentas).
+## Where it runs
 
-A chave fica salva só no aparelho. Nos planos grátis o provedor pode usar o que recebe (telas e
-arquivos do Flipper inclusive) para treinar modelos.
+| Device | Browser | Connection |
+|---|---|---|
+| iPhone | **Bluefy** (free on the App Store). Safari has no Web Bluetooth. | Bluetooth |
+| Android | Chrome | Bluetooth, or USB cable (OTG) |
+| Computer | Chrome or Edge | Bluetooth, or USB cable |
 
-## O que o agente consegue fazer
+iPhone has no USB option: iOS doesn't let web pages talk to USB devices.
 
-Ver a tela, apertar teclas (curto/longo), abrir apps pelo nome, listar/ler/gravar/apagar/renomear
-arquivos do SD, ler info do aparelho e da bateria. Tudo que vem do Flipper chega ao modelo marcado
-como dado não confiável (um arquivo no SD não consegue dar ordens ao agente).
+## Pick an AI
 
-## Desenvolvimento
+- **Google Gemini** (free tier) — key at <https://aistudio.google.com/apikey>. Default model: `gemini-flash-latest`.
+- **OpenRouter** — key at <https://openrouter.ai/keys>; use `:free` models (the "List" button shows only those that support tools).
+- **Any OpenAI-compatible API** — OpenAI, DeepSeek, Groq, or Ollama on your own PC.
+- **Claude**, with your Claude subscription and no API key — see [Claude mode](#claude-mode).
+
+Your key is stored only on your device. On free plans, the provider may use what it receives
+(including Flipper screens and files) to train models.
+
+## Claude mode
+
+Claude can't open a Bluetooth connection, so a small relay (a Cloudflare Worker) connects the two:
+
+```
+Claude ──MCP (OAuth)──► relay ──WebSocket──► this page on your phone ──BLE──► Flipper
+```
+
+1. In Flipper Agent: Settings → turn on **Claude mode** and note the device code.
+2. In Claude: Settings → Connectors → **Add custom connector**, with the relay address + `/mcp`
+   (the public demo relay is `https://flipper-relay.mktjet1.workers.dev/mcp`).
+3. On the login page, type the device code, then **approve on the phone**. Nothing gets access
+   without that approval.
+4. Tap **PiP** before switching to the Claude app: the picture-in-picture window keeps the page
+   alive in the background.
+
+The public relay is a shared demo. For regular use, **deploy your own** — it takes a few minutes and
+fits in Cloudflare's free plan.
+
+### Deploy your own relay
+
+You need [Node.js](https://nodejs.org) 20+ and a free [Cloudflare](https://dash.cloudflare.com/sign-up) account.
+
+```bash
+git clone https://github.com/AugustoFT/flipper-agent
+cd flipper-agent/relay
+npm install
+npm run publicar
+```
+
+The script (`relay/scripts/publicar.mjs`) does everything:
+
+1. logs you in to Cloudflare (opens the browser the first time);
+2. creates the login storage (a KV namespace) in **your** account and writes its id to
+   `wrangler.jsonc` — the id in the repository belongs to the author's account;
+3. deploys the Worker and prints its address.
+
+Then, in Flipper Agent → Settings → **Relay address**, paste the printed address, and in Claude add
+the connector with that address + `/mcp`. Run `npm run publicar -- --check` to verify everything
+without creating or deploying anything.
+
+If it says your account has no workers.dev subdomain: open the Cloudflare dashboard → Workers &
+Pages, pick a subdomain once, and run it again.
+
+Your relay limits tool calls per device (200 per hour, 1000 per day) and overall (20,000 per day), so
+a runaway loop can't exhaust the free plan; change them in `relay/wrangler.jsonc` (`vars`). The relay
+stores no screens or files: it forwards calls and keeps only the OAuth tokens and a hash of each
+device's secret.
+
+## Responsible use
+
+This app lets an AI operate your Flipper. Use it only on devices, cards, remotes and networks you
+own or are allowed to test. Transmitting on Sub-GHz, cloning access cards or running Bad USB on
+other people's computers can be illegal where you live. The agent is told to transmit only when you
+explicitly ask, and to confirm before deleting or overwriting files — but AI makes mistakes, so
+watch what it does. Everything that comes from the Flipper (screen, file names and contents) reaches
+the model marked as untrusted data, so a file on the SD card can't give the agent orders.
+
+## Troubleshooting
+
+- **iPhone can't find the Flipper** — use Bluefy, close the official Flipper app (it holds the
+  connection) and type the PIN shown on the Flipper the first time.
+- **Connection drops when opening Bad KB / Bluetooth Remote** — expected: those apps switch the
+  Flipper's radio to keyboard mode. Exit the app on the Flipper and it reconnects. Over USB this
+  doesn't happen.
+- **The live screen says "Paused"** — it pauses after 30 s without activity to free up Bluetooth for
+  key presses. Tap it to resume; the agent resumes it automatically.
+- **Something else** — the connect screen has a "Connection diagnostics" section; copy it into an
+  [issue](https://github.com/AugustoFT/flipper-agent/issues).
+
+## Development
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173 (no PC, Web Bluetooth funciona em localhost)
-npm run build        # gera dist/ para publicar
+npm run dev          # http://localhost:5173 — Web Bluetooth works on localhost
+npm run build        # static dist/ for GitHub Pages, Vercel or Netlify (needs HTTPS for Bluetooth)
 ```
 
-Testes no Flipper real pelo USB (só leitura — não aperta tecla nem grava):
+Open `/?demo` for a simulated Flipper, `/?diag` for the background-mode test. Tests against a real
+Flipper over USB (read-only unless stated):
 
 ```bash
 npm run teste:usb -- COM3
 npm run teste:ferramentas -- COM3
+npm run teste:cabo -- COM3       # the browser USB transport over a real port
+cd relay && npm run teste -- demo  # relay end to end (start `npx wrangler dev` first)
 ```
 
-## Publicar (precisa de HTTPS para o Bluetooth funcionar no celular)
+## How it works
 
-O `dist/` é estático: serve em GitHub Pages, Vercel ou Netlify. O `base: './'` do Vite deixa
-funcionar em qualquer subcaminho.
+Protocol learned from [zeffin](https://github.com/samartined/zeffin) (AGPL — no code copied, only
+the understanding of the protocol) and from the firmware's `.proto` files:
 
-## Como funciona (engenharia reversa)
-
-Protocolo levantado a partir do [zeffin](https://github.com/samartined/zeffin) (AGPL — nenhum código
-copiado, só o entendimento do protocolo) e dos `.proto` do firmware:
-
-- **RPC**: mensagens `PB.Main` em protobuf, cada uma prefixada pelo tamanho (varint). Codec
-  escrito à mão em `src/flipper/pb.ts` (os `.proto` oficiais não têm licença declarada).
-- **BLE**: serviço `8fe5b3d5-…`, characteristic de leitura `…61fe`, escrita `…62fe` e controle de
-  fluxo `…63fe` (`src/flipper/ble.ts`). O Flipper concede 1024 bytes de crédito e só reabastece
-  quando a janela acaba — escrever além disso perde dados em silêncio.
-- **Teclas**: `PRESS → SHORT/LONG → RELEASE` num envio só; outra ordem é descartada pelo firmware.
-- **Tela**: 128×64, 1 bit, empacotada na vertical (8 linhas por byte). Depois de apertar, espera
-  250 ms sem quadro novo (teto 1,5 s) porque algumas animações nunca param.
-
-## Estrutura
+- **RPC**: `PB.Main` protobuf messages, each prefixed by its length (varint). Hand-written codec in
+  `src/flipper/pb.ts`.
+- **BLE**: service `8fe5b3d5-…`, read characteristic `…61fe`, write `…62fe` and flow control
+  `…63fe` (`src/flipper/ble.ts`). The Flipper grants a 1024-byte credit window and only refills it
+  when it runs out — writing past it silently loses data.
+- **USB**: Web Serial (computers) or WebUSB (Android), CDC-ACM; the CLI is switched to RPC with
+  `start_rpc_session` (`src/flipper/usb.ts`).
+- **Keys**: `PRESS → SHORT/LONG → RELEASE` in one batch; any other order is dropped by the firmware.
+- **Screen**: 128×64, 1 bit, packed vertically (8 rows per byte). After a key press it waits 250 ms
+  without a new frame (1.5 s cap), because some animations never stop.
 
 ```
-src/flipper/   pb.ts (codec) · rpc.ts (sessão) · client.ts (operações) · screen.ts · ble.ts
-src/agent/     agent.ts (loop + prompt) · tools.ts · providers.ts (Gemini/OpenRouter)
-src/ui/        App.tsx · Screen.tsx (tela ao vivo + controle) · SettingsPanel.tsx
-scripts/       testes pelo USB (Node + serialport)
+src/flipper/   pb.ts (codec) · rpc.ts (session) · client.ts (operations) · ble.ts · usb.ts · screen.ts
+src/agent/     agent.ts (loop) · specs.ts (prompt + tools, shared with the relay) · tools.ts · providers.ts
+src/relay/     client.ts (phone side of the relay)
+src/ui/        App.tsx · Screen.tsx · SettingsPanel.tsx · i18n.ts
+relay/         Cloudflare Worker: OAuth + MCP endpoint + one Durable Object per device
 ```
+
+## License
+
+[MIT](LICENSE). Not affiliated with Flipper Devices.

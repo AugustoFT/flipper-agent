@@ -141,10 +141,24 @@ export class FlipperClient {
 
   // ---------- tela e teclas ----------
 
+  /** A tela está sendo transmitida agora (ou o pedido para transmitir já saiu). */
+  get isStreaming() {
+    return this.streaming
+  }
+
   async startScreen() {
     if (this.streaming) return
-    await this.rpc.request('iniciar_tela', F.guiStartScreenStream)
-    this.streaming = true
+    const seq = this.screen.currentSeq
+    this.streaming = true // antes do pedido: o primeiro quadro pode chegar junto com a resposta
+    try {
+      await this.rpc.request('iniciar_tela', F.guiStartScreenStream)
+    } catch (e) {
+      this.streaming = false
+      throw e
+    }
+    // Religando depois de uma pausa: o último quadro guardado pode estar velho. Espera o primeiro
+    // quadro novo (o Flipper manda um ao começar), para ninguém agir olhando a tela antiga.
+    if (seq > 0) await this.screen.waitNewer(seq, 1500)
   }
 
   async stopScreen() {
