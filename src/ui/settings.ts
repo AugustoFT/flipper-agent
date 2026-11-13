@@ -17,8 +17,8 @@ export interface Settings {
   relayUrl: string
 }
 
-/** Servidor do relay publicado. Vazio até o deploy; dá para trocar nas configurações. */
-export const RELAY_URL = ''
+/** Servidor do relay publicado (Cloudflare Worker). Dá para trocar nas configurações. */
+export const RELAY_URL = 'https://flipper-relay.mktjet1.workers.dev'
 
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'gemini',
@@ -44,6 +44,8 @@ export function loadSettings(): Settings {
       ...s,
       keys: { ...DEFAULT_SETTINGS.keys, ...s.keys },
       models: { ...DEFAULT_SETTINGS.models, ...s.models },
+      // Quem abriu o app antes do deploy tem "" salvo: vazio volta ao padrão.
+      relayUrl: s.relayUrl || DEFAULT_SETTINGS.relayUrl,
     }
   } catch {
     return DEFAULT_SETTINGS

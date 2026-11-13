@@ -6,8 +6,8 @@
   // global_fetch_strictly_public: exigido pela biblioteca de OAuth para buscar documentos de cliente (CIMD).
   "compatibility_flags": ["global_fetch_strictly_public"],
   "kv_namespaces": [
-    // No deploy: `npx wrangler kv namespace create OAUTH_KV` e cole o id aqui.
-    { "binding": "OAUTH_KV", "id": "PREENCHER_NO_DEPLOY" }
+    // Criado com `npx wrangler kv namespace create OAUTH_KV`.
+    { "binding": "OAUTH_KV", "id": "ffdf76bd18a8476bad2cac847ebb0023" }
   ],
   "durable_objects": {
     "bindings": [{ "name": "DEVICE", "class_name": "Device" }]

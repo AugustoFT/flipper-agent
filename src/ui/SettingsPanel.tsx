@@ -136,7 +136,7 @@ export function SettingsPanel(props: {
             inputMode="url"
             autoComplete="off"
             value={s.relayUrl}
-            placeholder="https://flipper-relay.SEU-USUARIO.workers.dev"
+            placeholder="https://flipper-relay.mktjet1.workers.dev"
             onChange={(e) => set({ relayUrl: e.target.value.trim() })}
           />
         </label>
