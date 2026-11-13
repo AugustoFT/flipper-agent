@@ -1,0 +1,10 @@
+{
+  "name": "Flipper Agent",
+  "short_name": "Flipper Agent",
+  "description": "Agente de IA que controla o Flipper Zero pelo Bluetooth do celular.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
