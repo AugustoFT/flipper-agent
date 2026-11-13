@@ -144,7 +144,11 @@ export class RpcSession {
       try {
         msgs = this.deframer.push(chunk)
       } catch (e) {
+        // Fluxo corrompido (ex.: o iOS congelou a página e perdeu pedaços): não dá para
+        // ressincronizar sem saber onde começa a próxima mensagem. Fecha o transporte para a
+        // interface ver "desconectado" — antes, a sessão morria por dentro e a tela dizia "conectado".
         this.fail(`fluxo RPC inválido: ${(e as Error).message}`)
+        transport.close().catch(() => {})
         return
       }
       for (const raw of msgs) this.dispatch(decodeMain(raw))

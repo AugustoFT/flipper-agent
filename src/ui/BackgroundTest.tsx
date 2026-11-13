@@ -38,6 +38,8 @@ export function BackgroundTest({ fz, onClose }: { fz: FlipperClient | null; onCl
   const [events, setEvents] = useState<Ev[]>([])
   const [keepAwake, setKeepAwake] = useState(false)
   const [pip, setPip] = useState(false)
+  const [pipReady, setPipReady] = useState(false)
+  const pipBusy = useRef(false)
   const start = useRef(0)
   const last = useRef(0)
   const tickN = useRef(0)
@@ -115,11 +117,45 @@ export function BackgroundTest({ fz, onClose }: { fz: FlipperClient | null; onCl
 
   // Canvas com a tela do Flipper, para o PiP.
   useEffect(() => {
-    const ctx = canvasRef.current?.getContext('2d')
-    if (!ctx || !fz) return
-    const draw = () => fz.screen.frame && drawFrame(ctx, fz.screen.frame, 2, '#ff8c29', '#1b1b1b')
+    // Redesenha SEMPRE (5x/s), com um relógio no canto: um captureStream sem quadros novos deixa o
+    // vídeo sem dados e o iOS aborta o PiP ("The operation was aborted").
+    const canvas = canvasRef.current
+    const video = videoRef.current
+    const ctx = canvas?.getContext('2d')
+    if (!canvas || !video || !ctx) return
+    const t0 = Date.now()
+    const draw = () => {
+      if (fz?.screen.frame) drawFrame(ctx, fz.screen.frame, 2, '#ff8c29', '#1b1b1b')
+      else {
+        ctx.fillStyle = '#ff8c29'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+      }
+      ctx.fillStyle = '#1b1b1b'
+      ctx.fillRect(canvas.width - 46, 0, 46, 14)
+      ctx.fillStyle = '#ff8c29'
+      ctx.font = '11px monospace'
+      ctx.fillText(`${Math.floor((Date.now() - t0) / 1000)}s`, canvas.width - 42, 11)
+    }
     draw()
-    return fz.screen.subscribe(draw)
+    const id = setInterval(draw, 200)
+
+    // Prepara o vídeo ANTES do toque: no toque, o pedido de PiP tem que sair na hora.
+    if ('captureStream' in canvas && !video.srcObject) {
+      video.srcObject = canvas.captureStream(5)
+      video.play().then(
+        () => setPipReady(true),
+        (e) => log(`vídeo do PiP não tocou: ${(e as Error).message}`),
+      )
+    }
+    const onEnter = () => (setPip(true), log('PiP ABERTO'))
+    const onLeave = () => (setPip(false), log('PiP fechado'))
+    video.addEventListener('enterpictureinpicture', onEnter)
+    video.addEventListener('leavepictureinpicture', onLeave)
+    return () => {
+      clearInterval(id)
+      video.removeEventListener('enterpictureinpicture', onEnter)
+      video.removeEventListener('leavepictureinpicture', onLeave)
+    }
   }, [fz])
 
   function begin() {
@@ -127,7 +163,8 @@ export function BackgroundTest({ fz, onClose }: { fz: FlipperClient | null; onCl
     last.current = 0
     tickN.current = 0
     setSamples([])
-    setEvents([{ t: 0, text: `início · Flipper ${fz ? 'conectado' : 'NÃO conectado'} · ${navigator.userAgent}` }])
+    const estado = !fz ? 'NÃO conectado' : fz.rpc.closed ? `CONEXÃO MORTA (${fz.rpc.closed}) — reconecte` : 'conectado'
+    setEvents([{ t: 0, text: `início · Flipper ${estado} · PiP ${pipReady ? 'pronto' : 'não pronto'} · ${navigator.userAgent}` }])
     setRunning(true)
   }
 
@@ -153,29 +190,35 @@ export function BackgroundTest({ fz, onClose }: { fz: FlipperClient | null; onCl
     }
   }
 
-  async function togglePip() {
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    if (!video || !canvas) return
+  // SEM async/await antes do pedido: no iOS o PiP só é aceito dentro do mesmo "toque" (user
+  // activation). Qualquer await antes (como esperar o vídeo tocar) faz o iOS recusar com
+  // "The request is not triggered by a user activation".
+  function togglePip() {
+    const video = videoRef.current as (HTMLVideoElement & { webkitSetPresentationMode?: (m: string) => void }) | null
+    if (!video || pipBusy.current) return
+    if (pip || document.pictureInPictureElement) {
+      document.exitPictureInPicture?.().catch(() => {})
+      return
+    }
+    if (!pipReady) {
+      log('PiP: o vídeo ainda não está pronto, toque de novo em 1 s')
+      return
+    }
+    pipBusy.current = true
+    const done = () => (pipBusy.current = false)
     try {
-      if (pip) {
-        if (document.pictureInPictureElement) await document.exitPictureInPicture()
-        setPip(false)
-        return
-      }
-      if (!('captureStream' in canvas)) throw new Error('canvas.captureStream não existe')
-      video.srcObject = canvas.captureStream(5)
-      await video.play()
-      const v = video as HTMLVideoElement & { webkitSetPresentationMode?: (m: string) => void }
       if (video.requestPictureInPicture && document.pictureInPictureEnabled) {
-        await video.requestPictureInPicture()
-      } else if (v.webkitSetPresentationMode) {
-        v.webkitSetPresentationMode('picture-in-picture')
-      } else throw new Error('este navegador não oferece Picture in Picture')
-      setPip(true)
-      log('PiP ligado')
+        video.requestPictureInPicture().then(done, (e: Error) => (log(`PiP falhou: ${e.name}: ${e.message}`), done()))
+      } else if (video.webkitSetPresentationMode) {
+        video.webkitSetPresentationMode('picture-in-picture')
+        done()
+      } else {
+        log('este navegador não oferece Picture in Picture')
+        done()
+      }
     } catch (e) {
       log(`PiP falhou: ${(e as Error).message}`)
+      done()
     }
   }
 
@@ -245,8 +288,8 @@ export function BackgroundTest({ fz, onClose }: { fz: FlipperClient | null; onCl
           <button type="button" onClick={toggleAwake}>
             {keepAwake ? 'Tela acesa: ligado' : 'Manter tela acesa'}
           </button>
-          <button type="button" onClick={togglePip} disabled={!fz}>
-            {pip ? 'PiP: ligado' : 'Tentar PiP'}
+          <button type="button" onClick={togglePip}>
+            {pip ? 'PiP: ligado (toque p/ fechar)' : pipReady ? 'Tentar PiP' : 'PiP preparando…'}
           </button>
           <button type="button" onClick={copy} disabled={samples.length === 0}>
             Copiar relatório
