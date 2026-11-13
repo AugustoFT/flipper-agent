@@ -56,8 +56,6 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  overflow: hidden;
-  overscroll-behavior: none;
 }
 
 body {
@@ -96,15 +94,9 @@ button:disabled {
 /* ---------- estrutura ---------- */
 
 .app {
-  /* Fixo e do tamanho da área VISÍVEL (useKeyboard): com o teclado aberto o app encolhe para caber
-     acima dele, em vez de a página inteira ser empurrada para cima. */
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: var(--app-h, 100dvh);
-  transform: translateY(var(--app-y, 0px));
+  /* Página normal (rola): o Bluefy/Safari precisam disso para esconder a barra e atualizar ao puxar. */
   display: flex;
+  height: 100dvh;
   flex-direction: column;
   max-width: 560px;
   margin: 0 auto;
@@ -126,8 +118,15 @@ button:disabled {
   pointer-events: none;
 }
 
-/* Digitando: o controle sai de cena (a tela continua à vista) e o teclado já cobre a área segura. */
+/* Digitando: só agora o app fica fixo e do tamanho da área VISÍVEL acima do teclado (useKeyboard),
+   em vez de a página inteira ser empurrada para cima. O controle sai de cena; a tela continua à vista. */
 .app.typing {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--app-h, 100dvh);
+  transform: translateY(var(--app-y, 0px));
   padding-bottom: 0;
 }
 .app.typing .controls,
