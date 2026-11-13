@@ -10,7 +10,7 @@ import { BackgroundTest } from './BackgroundTest'
 import { Device } from './Screen'
 import { loadSettings, saveSettings, type Settings } from './settings'
 import { SettingsPanel } from './SettingsPanel'
-import { useKeyboard } from './useKeyboard'
+import { useKeyboard, type VvSample } from './useKeyboard'
 
 type ChatItem =
   | { kind: 'user'; text: string }
@@ -38,7 +38,10 @@ export function App() {
   const chatRef = useRef<HTMLElement>(null)
   /** Conexão atual para o agente: troca a cada reconexão sem interromper a tarefa. */
   const link = useRef(new FlipperLink()).current
-  const typing = useKeyboard()
+  // ?vv na URL: mostra as medidas da tela/teclado (para calibrar em navegadores como o Bluefy).
+  const [vvDebug] = useState(() => new URLSearchParams(location.search).has('vv'))
+  const [vv, setVv] = useState<VvSample | null>(null)
+  const typing = useKeyboard(vvDebug ? setVv : undefined)
   /** Ficha da reconexão em andamento; `stop` interrompe o laço. */
   const recon = useRef<{ stop: boolean } | null>(null)
 
@@ -420,6 +423,13 @@ ${connectHint(err)}`)
         </div>
       </footer>
 
+      {vvDebug && vv && (
+        <pre className="vv-debug" aria-hidden="true">
+          {`inner ${vv.inner}  base ${vv.base}
+vv ${vv.vvH} @${vv.vvTop}  zoom ${vv.scale.toFixed(2)}
+teclado ${vv.kb ? 'aberto' : 'fechado'}`}
+        </pre>
+      )}
       {showBgTest && <BackgroundTest fz={fz} onClose={() => setShowBgTest(false)} />}
       {showSettings && <SettingsPanel value={settings} onChange={setSettings} onClose={() => setShowSettings(false)} />}
     </div>

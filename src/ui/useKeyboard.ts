@@ -11,7 +11,16 @@ import { useEffect, useState } from 'react'
  * Teclado aberto = a área visível ficou bem menor que a maior altura já vista nesta largura
  * (no iPhone `innerHeight` não muda com o teclado; no Android muda, por isso guardamos o máximo).
  */
-export function useKeyboard(): boolean {
+export interface VvSample {
+  inner: number
+  base: number
+  vvH: number
+  vvTop: number
+  scale: number
+  kb: boolean
+}
+
+export function useKeyboard(debug?: (s: VvSample) => void): boolean {
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -32,9 +41,17 @@ export function useKeyboard(): boolean {
       baseHeight = Math.max(baseHeight, window.innerHeight)
       const zoomed = vv.scale > 1.01
       const kb = !zoomed && baseHeight - vv.height > 150
-      root.style.setProperty('--app-h', `${Math.round(vv.height)}px`)
-      root.style.setProperty('--app-y', `${Math.round(zoomed ? 0 : vv.offsetTop)}px`)
+      if (kb) {
+        root.style.setProperty('--app-h', `${Math.round(vv.height)}px`)
+        root.style.setProperty('--app-y', `${Math.round(vv.offsetTop)}px`)
+      } else {
+        // Teclado fechado: volta ao 100dvh. No Bluefy a visualViewport inclui a faixa atrás da barra
+        // de endereço flutuante, e o campo de mensagem ficava escondido embaixo dela.
+        root.style.removeProperty('--app-h')
+        root.style.removeProperty('--app-y')
+      }
       setOpen(kb)
+      if (debug) debug({ inner: window.innerHeight, base: baseHeight, vvH: Math.round(vv.height), vvTop: Math.round(vv.offsetTop), scale: vv.scale, kb })
     }
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(apply)
