@@ -104,7 +104,7 @@ button:disabled {
 }
 
 /* Digitando: só agora o app fica fixo e do tamanho da área VISÍVEL acima do teclado (useKeyboard),
-   em vez de a página inteira ser empurrada para cima. O controle sai de cena; a tela continua à vista. */
+   em vez de a página inteira ser empurrada para cima. A tela e o controle (ao lado dela) continuam à vista. */
 .app.typing {
   position: fixed;
   top: 0;
@@ -114,7 +114,6 @@ button:disabled {
   transform: translateY(var(--app-y, 0px));
   padding-bottom: 0;
 }
-.app.typing .controls,
 .app.typing .device-note {
   display: none;
 }
@@ -179,15 +178,18 @@ button:disabled {
 /* ---------- o aparelho: LCD + controle ---------- */
 
 .device {
+  /* Tela à esquerda, controle compacto encostado no canto direito: nenhuma linha extra. */
   display: grid;
-  gap: 10px;
-  padding-bottom: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  padding-bottom: 8px;
 }
 
 .bezel {
   background: var(--bezel);
   border-radius: var(--radius-m);
-  padding: 10px;
+  padding: 6px;
   box-shadow: var(--shadow);
 }
 
@@ -213,31 +215,20 @@ button:disabled {
 }
 
 .controls {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 14px;
-}
-
-/* D-pad redondo, como o do aparelho: quatro setas num disco e o OK no centro. */
-.dpad {
-  position: relative;
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  background: var(--pad);
-  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-columns: repeat(3, var(--key));
+  grid-template-rows: repeat(3, var(--key));
+  gap: 3px;
+  --key: 30px;
 }
 
 .pad {
-  position: absolute;
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  padding: 0;
   border: 0;
-  border-radius: 50%;
-  background: transparent;
+  border-radius: 7px;
+  background: var(--pad);
   color: var(--ink);
   user-select: none;
   -webkit-user-select: none;
@@ -246,53 +237,39 @@ button:disabled {
 }
 .pad:active:not(:disabled) {
   background: var(--pad-pressed);
-  transform: scale(0.94);
+  transform: scale(0.92);
 }
 
+/* Cruz no 3×3; o BACK fica no canto de baixo à direita, como no aparelho. */
 .pad-up {
-  top: 2px;
-  left: 40px;
-}
-.pad-down {
-  bottom: 2px;
-  left: 40px;
+  grid-area: 1 / 2;
 }
 .pad-left {
-  left: 2px;
-  top: 40px;
+  grid-area: 2 / 1;
+}
+.pad-ok {
+  grid-area: 2 / 2;
+  background: var(--pad-key);
 }
 .pad-right {
-  right: 2px;
-  top: 40px;
+  grid-area: 2 / 3;
 }
-
-.pad-ok {
-  top: 35px;
-  left: 35px;
-  width: 50px;
-  height: 50px;
-  background: var(--pad-key);
-  box-shadow: var(--shadow);
+.pad-down {
+  grid-area: 3 / 2;
+}
+.pad-back {
+  grid-area: 3 / 3;
 }
 
 .ok-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--accent);
 }
 
-/* BACK fica fora do disco, embaixo à direita — como no Flipper. */
-.pad-back {
-  position: static;
-  width: 44px;
-  height: 44px;
-  margin-bottom: 2px;
-  background: var(--pad);
-  box-shadow: var(--shadow);
-}
-
 .device-note {
+  grid-column: 1 / -1;
   margin: 0;
   text-align: center;
   font-size: var(--step--1);

@@ -4,7 +4,8 @@ import { HEIGHT, WIDTH } from '../flipper/screen'
 import { useLcd } from './useLcd'
 
 /**
- * O "corpo" do Flipper: o LCD ao vivo e o D-pad redondo, com o BACK separado, como no aparelho.
+ * O "corpo" do Flipper: o LCD ao vivo e, ao lado dele, um controle compacto 3×3 (setas, OK e BACK).
+ * Fica no canto e não ocupa linha própria: o normal é comandar por mensagem, o controle é reserva.
  * As teclas imitam o botão físico: PRESS ao encostar, LONG aos 0,5 s, REPEAT segurando (rola listas
  * rápido), SHORT+RELEASE ao soltar.
  */
@@ -18,13 +19,11 @@ export function Device({ fz, locked }: { fz: FlipperClient; locked: boolean }) {
         <canvas ref={canvas} width={WIDTH} height={HEIGHT} className="lcd" role="img" aria-label="Tela do Flipper ao vivo" />
       </div>
       <div className="controls" aria-label="Controle">
-        <div className="dpad">
-          <PadKey fz={fz} k="UP" label="Para cima" locked={locked} />
-          <PadKey fz={fz} k="LEFT" label="Esquerda" locked={locked} />
-          <PadKey fz={fz} k="OK" label="OK" locked={locked} />
-          <PadKey fz={fz} k="RIGHT" label="Direita" locked={locked} />
-          <PadKey fz={fz} k="DOWN" label="Para baixo" locked={locked} />
-        </div>
+        <PadKey fz={fz} k="UP" label="Para cima" locked={locked} />
+        <PadKey fz={fz} k="LEFT" label="Esquerda" locked={locked} />
+        <PadKey fz={fz} k="OK" label="OK" locked={locked} />
+        <PadKey fz={fz} k="RIGHT" label="Direita" locked={locked} />
+        <PadKey fz={fz} k="DOWN" label="Para baixo" locked={locked} />
         <PadKey fz={fz} k="BACK" label="Voltar" locked={locked} />
       </div>
       {locked && <p className="device-note">O agente está usando o Flipper. Toque em Parar para assumir.</p>}
@@ -79,7 +78,7 @@ function PadKey({ fz, k, label, locked }: { fz: FlipperClient; k: Key; label: st
 function Arrow({ k }: { k: Key }) {
   const rot = { UP: 0, RIGHT: 90, DOWN: 180, LEFT: 270 }[k as 'UP'] ?? 0
   return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" style={{ transform: `rotate(${rot}deg)` }}>
+    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" style={{ transform: `rotate(${rot}deg)` }}>
       <path d="M8 4 13 11H3z" fill="currentColor" />
     </svg>
   )
@@ -87,7 +86,7 @@ function Arrow({ k }: { k: Key }) {
 
 function BackIcon() {
   return (
-    <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+    <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true">
       <path d="M7 5 3 9l4 4M3.5 9H12a4.5 4.5 0 0 1 0 9H9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
