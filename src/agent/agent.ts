@@ -1,7 +1,7 @@
 // O loop do agente: pede ao modelo, executa as ferramentas que ele chamou, devolve os resultados,
 // e repete até ele responder só com texto (ou bater o limite de passos, ou o usuário parar).
 
-import type { FlipperClient } from '../flipper/client'
+import type { FlipperLink } from '../flipper/link'
 import { runTool, TOOL_SPECS } from './tools'
 import type { Msg, Provider, ToolCall, ToolResult } from './types'
 
@@ -13,7 +13,8 @@ Como operar:
 - Para abrir um app, prefira flipper_app_start com o nome do app — é mais rápido e confiável que navegar nos menus.
 - Para sair de um app ou voltar ao início, use "BACK" ou "BACK:long".
 - Cada tecla leva cerca de meio segundo pelo Bluetooth. Não repita uma ação que deu timeout sem olhar a tela antes: o resultado é desconhecido.
-- Apps que usam o Bluetooth do Flipper (Bluetooth Remote, Bad KB em modo BT) trocam o rádio para modo teclado e derrubam esta conexão: você perde o controle até o usuário sair do app. Não abra esses apps; se o usuário pedir, avise isso antes.
+- Apps que usam o Bluetooth do Flipper como teclado/controle (Bad KB/Bad USB com interface BT, Bluetooth Remote, disparador de câmera) trocam o rádio e derrubam esta conexão SE ela for por Bluetooth. Para usá-los faça uma passagem de bastão: prepare tudo antes (grave o script, deixe o app pronto) e então chame flipper_handoff, que abre o app, explica ao usuário o que fazer no Flipper e espera a conexão voltar. Depois confira a tela. Bad USB com interface USB não derruba nada.
+- Se a conexão cair no meio de uma ação, as próximas ferramentas esperam a reconexão sozinhas.
 - Arquivos ficam em /ext (cartão SD): /ext/infrared (.ir), /ext/subghz (.sub), /ext/nfc (.nfc), /ext/lfrfid (.rfid), /ext/badusb (.txt), /ext/apps (.fap).
 
 Segurança:
@@ -32,7 +33,7 @@ export interface AgentEvents {
 
 export interface RunOptions {
   provider: Provider
-  fz: FlipperClient
+  link: FlipperLink
   vision: boolean
   signal: AbortSignal
   maxSteps?: number
@@ -63,7 +64,7 @@ export async function runTurn(history: Msg[], userText: string, o: RunOptions): 
       }
       o.events.onToolStart(call)
       const r = await runTool(call, {
-        fz: o.fz,
+        link: o.link,
         vision: o.vision,
         signal: o.signal,
         onProgress: (m) => o.events.onToolProgress(call, m),

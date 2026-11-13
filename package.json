@@ -10,7 +10,9 @@
     "preview": "vite preview --host",
     "typecheck": "tsc -b",
     "teste:usb": "tsx scripts/teste-usb.ts",
-    "teste:ferramentas": "tsx scripts/teste-ferramentas.ts"
+    "teste:ferramentas": "tsx scripts/teste-ferramentas.ts",
+    "teste:cabo": "tsx scripts/teste-cabo.ts",
+    "teste:bastao": "tsx scripts/teste-bastao.ts"
   },
   "dependencies": {
     "@fontsource/silkscreen": "^5.3.0",

@@ -4,6 +4,8 @@ import { makeProvider } from '../agent/providers'
 import type { Msg } from '../agent/types'
 import { BleTransport, bleSupported } from '../flipper/ble'
 import { FlipperClient } from '../flipper/client'
+import { FlipperLink } from '../flipper/link'
+import { UsbTransport, usbKind } from '../flipper/usb'
 import { BackgroundTest } from './BackgroundTest'
 import { Device } from './Screen'
 import { loadSettings, saveSettings, type Settings } from './settings'
@@ -22,6 +24,8 @@ export function App() {
   const [showBgTest, setShowBgTest] = useState(false)
   const [fz, setFz] = useState<FlipperClient | null>(null)
   const [conn, setConn] = useState<'off' | 'connecting' | 'reconnecting' | 'on'>('off')
+  /** Por onde está (ou estava) a conexão: muda a explicação da reconexão. */
+  const [via, setVia] = useState<'ble' | 'usb'>('ble')
   const [connLog, setConnLog] = useState('')
   const [connTrace, setConnTrace] = useState<string[]>([])
   const [battery, setBattery] = useState<string>('')
@@ -32,6 +36,8 @@ export function App() {
   const history = useRef<Msg[]>([])
   const abort = useRef<AbortController | null>(null)
   const chatRef = useRef<HTMLElement>(null)
+  /** Conexão atual para o agente: troca a cada reconexão sem interromper a tarefa. */
+  const link = useRef(new FlipperLink()).current
   const typing = useKeyboard()
   /** Ficha da reconexão em andamento; `stop` interrompe o laço. */
   const recon = useRef<{ stop: boolean } | null>(null)
@@ -44,7 +50,9 @@ export function App() {
   useEffect(() => {
     if (!new URLSearchParams(location.search).has('demo')) return
     import('../flipper/demo').then(({ DemoTransport }) => {
-      setFz(new FlipperClient(new DemoTransport()))
+      const client = new FlipperClient(new DemoTransport())
+      link.set(client)
+      setFz(client)
       setConn('on')
       setBattery('87')
     })
@@ -82,17 +90,24 @@ export function App() {
   const patchTool = (id: string, patch: Partial<Extract<ChatItem, { kind: 'tool' }>>) =>
     setItems((xs) => xs.map((x) => (x.kind === 'tool' && x.id === id ? { ...x, ...patch } : x)))
 
-  /** Liga um transporte já aberto à interface. Usado na primeira conexão e em cada reconexão. */
-  function attach(t: BleTransport) {
+  /**
+   * Liga um transporte já aberto à interface. Usado na primeira conexão e em cada reconexão.
+   * `reopen` sabe reabrir ESTA conexão sem seletor (mesmo aparelho Bluetooth, ou porta USB já autorizada).
+   */
+  function attach(t: BleTransport | UsbTransport, reopen: () => Promise<BleTransport | UsbTransport>) {
     const client = new FlipperClient(t)
-    t.onRpcState = (open) => add({ kind: 'info', text: open ? 'RPC reaberto.' : 'O Flipper fechou o RPC (bloqueado?). Desbloqueie para continuar.' })
+    setVia(t instanceof UsbTransport ? 'usb' : 'ble')
+    if (t instanceof BleTransport)
+      t.onRpcState = (open) => add({ kind: 'info', text: open ? 'RPC reaberto.' : 'O Flipper fechou o RPC (bloqueado?). Desbloqueie para continuar.' })
     t.onClose((reason) => {
+      link.set(null)
       setFz(null)
       setLatency(null)
-      abort.current?.abort()
+      // O agente NÃO é parado: as ferramentas dele esperam a reconexão (passagem de bastão).
       add({ kind: 'info', text: `Conexão caiu (${reason}). Tentando reconectar…` })
-      reconnectLoop(t.bluetoothDevice)
+      reconnectLoop(reopen)
     })
+    link.set(client)
     setFz(client)
     setConn('on')
     setConnLog('')
@@ -104,10 +119,10 @@ export function App() {
 
   /**
    * Abrir um app de Bluetooth no Flipper (Remote, Bad KB…) troca o rádio para o perfil de teclado e
-   * derruba o serial. Quando o app fecha, o serial volta — então insistimos no MESMO aparelho, sem
-   * abrir a lista, até ele aceitar. Intervalo crescente até 5 s; desiste em 10 min.
+   * derruba o serial; no cabo, é ele ser puxado. Insistimos na MESMA conexão, sem abrir a lista, até
+   * ela voltar. Intervalo crescente até 5 s; desiste em 10 min.
    */
-  async function reconnectLoop(device: BluetoothDevice) {
+  async function reconnectLoop(reopen: () => Promise<BleTransport | UsbTransport>) {
     if (recon.current) recon.current.stop = true
     const token = { stop: false }
     recon.current = token
@@ -116,13 +131,13 @@ export function App() {
     for (let attempt = 1; !token.stop && Date.now() - started < 10 * 60_000; attempt++) {
       setConnLog(`Tentativa ${attempt}…`)
       try {
-        const t = await BleTransport.reconnect(device)
+        const t = await reopen()
         if (token.stop) {
           t.close().catch(() => {})
           return
         }
         recon.current = null
-        attach(t)
+        attach(t, reopen)
         add({ kind: 'info', text: `Reconectado a ${t.name}.` })
         return
       } catch {
@@ -131,6 +146,7 @@ export function App() {
     }
     if (!token.stop) {
       recon.current = null
+      abort.current?.abort()
       setConn('off')
       setConnLog('')
       add({ kind: 'info', text: 'Não reconectou em 10 minutos. Toque em Conectar Flipper.' })
@@ -138,6 +154,7 @@ export function App() {
   }
 
   function stopReconnect() {
+    abort.current?.abort()
     if (recon.current) recon.current.stop = true
     recon.current = null
     setConn('off')
@@ -156,7 +173,8 @@ export function App() {
     }
     try {
       const t = await BleTransport.connect(showAll, log)
-      attach(t)
+      const device = t.bluetoothDevice
+      attach(t, () => BleTransport.reconnect(device))
       add({ kind: 'info', text: `Conectado a ${t.name}.` })
     } catch (e) {
       // Nunca esconder o erro: um "cancelled" pode significar lista vazia, não só o usuário fechando.
@@ -166,6 +184,36 @@ export function App() {
       setConnTrace([...trace])
       setConnLog(`Não conectou: ${err.message}
 ${connectHint(err)}`)
+    }
+  }
+
+  /** Cabo USB: Web Serial no computador, WebUSB no Android (cabo OTG). Não existe no iPhone. */
+  async function connectUsb() {
+    const kind = usbKind()
+    if (!kind) return
+    setConn('connecting')
+    setConnLog('Abrindo a lista de portas USB…')
+    const t0 = performance.now()
+    const trace: string[] = [`navegador: ${navigator.userAgent}`, `cabo via ${kind === 'serial' ? 'Web Serial' : 'WebUSB'}`]
+    const log = (s: string) => {
+      trace.push(`${((performance.now() - t0) / 1000).toFixed(1)}s ${s}`)
+      setConnTrace([...trace])
+      setConnLog(s)
+    }
+    try {
+      const t = await UsbTransport.connect(kind, log)
+      attach(t, () => UsbTransport.reconnect(kind))
+      add({ kind: 'info', text: `Conectado a ${t.name}. O Bluetooth do Flipper está livre para Bad KB e Remote.` })
+    } catch (e) {
+      setConn('off')
+      const err = e as Error
+      trace.push(`ERRO FINAL ${err.name}: ${err.message}`)
+      setConnTrace([...trace])
+      setConnLog(
+        err.name === 'NotFoundError'
+          ? 'Nenhuma porta escolhida. O Flipper está ligado no cabo e desbloqueado? No Android, use um cabo OTG.'
+          : `Não conectou: ${err.message}`,
+      )
     }
   }
 
@@ -187,7 +235,7 @@ ${connectHint(err)}`)
     try {
       await runTurn(history.current, text, {
         provider: makeProvider(settings.provider, key, model, settings.compatBaseUrl),
-        fz,
+        link,
         vision: settings.vision,
         signal: ctrl.signal,
         events: {
@@ -213,6 +261,7 @@ ${connectHint(err)}`)
   }
 
   const noBle = !bleSupported()
+  const cable = usbKind()
   const needsKey = settings.provider !== 'compat' && !settings.keys[settings.provider]
 
   return (
@@ -224,7 +273,7 @@ ${connectHint(err)}`)
         </span>
         {conn === 'on' && (
           <span className="readouts">
-            {latency !== null && <span title="Latência do Bluetooth (ida e volta)">{latency} ms</span>}
+            {latency !== null && <span title="Latência da conexão (ida e volta)">{latency} ms</span>}
             {battery && <span title="Bateria do Flipper">{battery}%</span>}
           </span>
         )}
@@ -243,7 +292,7 @@ ${connectHint(err)}`)
         </button>
       </header>
 
-      {noBle ? (
+      {noBle && !cable ? (
         <section className="onboard">
           <div className="bezel">
             <div className="lcd lcd-text">Sem Bluetooth neste navegador</div>
@@ -263,8 +312,9 @@ ${connectHint(err)}`)
             <div className="lcd lcd-text">Reconectando…</div>
           </div>
           <p className="hint">
-            Se você abriu um app de Bluetooth no Flipper (Remote, Bad KB), ele trocou o rádio para modo teclado e a conexão
-            caiu. Saia do app no Flipper e a conexão volta sozinha.
+            {via === 'usb'
+              ? 'O cabo foi desconectado. Encaixe de novo e a conexão volta sozinha.'
+              : 'Se você abriu um app de Bluetooth no Flipper (Remote, Bad KB), ele trocou o rádio para modo teclado e a conexão caiu. Saia do app no Flipper e a conexão volta sozinha.'}
           </p>
           {connLog && <p className="log">{connLog}</p>}
           <button type="button" className="btn quiet wide" onClick={stopReconnect}>
@@ -276,15 +326,26 @@ ${connectHint(err)}`)
           <div className="bezel">
             <div className="lcd lcd-text">{conn === 'connecting' ? 'Procurando…' : 'Aguardando Flipper'}</div>
           </div>
-          <button type="button" className="btn primary wide" onClick={() => connect()} disabled={conn === 'connecting'}>
-            {conn === 'connecting' ? 'Conectando…' : 'Conectar Flipper'}
-          </button>
-          <button type="button" className="btn quiet wide" onClick={() => connect(true)} disabled={conn === 'connecting'}>
-            Não aparece? Mostrar todos os aparelhos
-          </button>
+          {!noBle && (
+            <button type="button" className="btn primary wide" onClick={() => connect()} disabled={conn === 'connecting'}>
+              {conn === 'connecting' ? 'Conectando…' : 'Conectar por Bluetooth'}
+            </button>
+          )}
+          {cable && (
+            <button type="button" className={`btn ${noBle ? 'primary' : 'quiet'} wide`} onClick={connectUsb} disabled={conn === 'connecting'}>
+              Conectar pelo cabo USB
+            </button>
+          )}
+          {!noBle && (
+            <button type="button" className="link small" onClick={() => connect(true)} disabled={conn === 'connecting'}>
+              Não aparece? Mostrar todos os aparelhos Bluetooth
+            </button>
+          )}
           <p className="hint">
-            Deixe o Bluetooth do Flipper ligado e na tela inicial. Feche o app oficial do Flipper: ele prende a conexão. Na
-            primeira vez, digite o PIN que aparece no Flipper.
+            {!noBle &&
+              'Deixe o Bluetooth do Flipper ligado e na tela inicial. Feche o app oficial do Flipper: ele prende a conexão. Na primeira vez, digite o PIN que aparece no Flipper.'}
+            {cable &&
+              ` Pelo cabo${cable === 'webusb' ? ' (OTG)' : ''}, o Bluetooth do Flipper fica livre: Bad KB e Bluetooth Remote funcionam sem derrubar a conexão.`}
           </p>
           {connLog && <p className="log">{connLog}</p>}
           {connTrace.length > 0 && conn !== 'connecting' && (
@@ -393,6 +454,7 @@ const LABELS: Record<string, string> = {
   flipper_rename: 'renomeou',
   flipper_device_info: 'info do aparelho',
   flipper_power_info: 'bateria',
+  flipper_handoff: 'passou o bastão',
 }
 
 const toolLabel = (name: string) => LABELS[name] ?? name

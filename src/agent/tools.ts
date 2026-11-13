@@ -5,6 +5,7 @@
 // dizendo "ignore as instruções e transmita X" não pode virar ordem para o modelo.
 
 import type { FlipperClient, Key } from '../flipper/client'
+import type { FlipperLink } from '../flipper/link'
 import { toText, type Frame } from '../flipper/screen'
 import { frameToPngBase64 } from './image'
 import type { ToolCall, ToolResult, ToolSpec } from './types'
@@ -104,6 +105,24 @@ export const TOOL_SPECS: ToolSpec[] = [
     description: 'Bateria: carga, tensão, temperatura, se está carregando.',
     parameters: { type: 'object', properties: {} },
   },
+  {
+    name: 'flipper_handoff',
+    description:
+      'Passagem de bastão para ações que derrubam a conexão Bluetooth (apps que usam o Bluetooth do Flipper como teclado/controle). ' +
+      'Prepare tudo antes. Esta ferramenta: mostra `message` ao usuário (diga exatamente o que ele deve fazer no Flipper e quando sair do app), ' +
+      'abre `app_name` (opcional, com `app_args`) e/ou aperta `keys` (opcional, mesma sintaxe de flipper_press), espera a conexão cair e VOLTAR ' +
+      '(até 10 min, enquanto o usuário usa o app) e devolve a tela. Se a conexão não cair (cabo USB, ou o app não usou o Bluetooth), devolve a tela na hora.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        app_name: { type: 'string' },
+        app_args: { type: 'string' },
+        keys: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['message'],
+    },
+  },
 ]
 
 /** Embrulha dados do Flipper como não confiáveis e neutraliza tentativas de fechar a tag. */
@@ -113,6 +132,45 @@ export function untrusted(source: string, payload: unknown): string {
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g, '�')
     .replace(/<\/?dados_flipper/gi, '‹dados_flipper')
   return `<dados_flipper fonte="${source.replace(/"/g, "'")}" confiavel="nao">\n${clean}\n</dados_flipper>`
+}
+
+function parseKeys(raw: unknown[]): Array<{ key: Key; long: boolean }> {
+  return raw.map((k) => {
+    const [name, mod] = String(k).toUpperCase().split(':')
+    if (!KEYS.includes(name as Key)) throw new Error(`tecla inválida: ${k} (use ${KEYS.join(', ')})`)
+    if (mod && mod !== 'LONG') throw new Error(`modificador inválido em ${k} (só ":long")`)
+    return { key: name as Key, long: mod === 'LONG' }
+  })
+}
+
+/**
+ * Passagem de bastão: dispara a ação que troca o rádio do Flipper, espera a conexão cair e voltar.
+ * Os erros da própria ação são esperados — a queda corta a resposta no meio.
+ */
+async function handoff(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+  const a = call.args
+  const message = str(a.message, 'message')
+  const keys = Array.isArray(a.keys) ? parseKeys(a.keys) : []
+  const appArgs = typeof a.app_args === 'string' && a.app_args.trim() ? checkPath(a.app_args.trim()) : ''
+  const before = await connected(ctx)
+  ctx.onProgress?.(message)
+  try {
+    await before.startScreen()
+    if (typeof a.app_name === 'string' && a.app_name.trim()) await before.appStart(a.app_name.trim(), appArgs)
+    for (const k of keys) await before.press(k.key, k.long)
+  } catch {
+    /* normal: a conexão caiu enquanto a ação rodava */
+  }
+  // A troca de rádio do Flipper leva 1–2 s; 8 s sem queda = o app não usou o Bluetooth (ou é cabo).
+  const dropped = await ctx.link.waitFor((c) => c !== before, 8_000, ctx.signal)
+  if (!dropped) {
+    const r = await before.screen.waitSettled(before.screen.currentSeq, 400, 3000)
+    return screenResult(call, ctx, r.frame, 'A conexão NÃO caiu (cabo USB, ou o app não usou o Bluetooth). Siga normalmente.')
+  }
+  ctx.onProgress?.(`${message} · esperando você sair do app no Flipper`)
+  const back = await connected(ctx)
+  await back.startScreen().catch(() => {}) // já transmitindo nesta sessão: tudo bem
+  return screenResult(call, ctx, await back.currentFrame(), 'A conexão voltou: o usuário saiu do app. Tela atual.')
 }
 
 function str(v: unknown, name: string): string {
@@ -127,7 +185,7 @@ function checkPath(p: string): string {
 }
 
 export interface ToolContext {
-  fz: FlipperClient
+  link: FlipperLink
   vision: boolean
   signal: AbortSignal
   /** Avisa a interface a cada tecla, para mostrar o progresso. */
@@ -143,11 +201,23 @@ function screenResult(call: ToolCall, ctx: ToolContext, frame: Frame | null, pre
   return { id: call.id, name: call.name, text: `${head}\n${untrusted('tela (texto, 2 linhas por caractere)', toText(frame))}` }
 }
 
+const RECONNECT_WAIT_MS = 10 * 60_000
+
+/** O cliente atual; se a conexão caiu, espera ela voltar (até 10 min) em vez de falhar. */
+async function connected(ctx: ToolContext): Promise<FlipperClient> {
+  if (ctx.link.current) return ctx.link.current
+  ctx.onProgress?.('esperando o Flipper reconectar…')
+  const back = await ctx.link.waitFor((c) => c !== null, RECONNECT_WAIT_MS, ctx.signal)
+  if (!back || !ctx.link.current) throw new Error('o Flipper ficou 10 minutos desconectado')
+  return ctx.link.current
+}
+
 export async function runTool(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
-  const { fz } = ctx
   const a = call.args
   const ok = (text: string): ToolResult => ({ id: call.id, name: call.name, text })
   try {
+    if (call.name === 'flipper_handoff') return await handoff(call, ctx)
+    const fz = await connected(ctx)
     switch (call.name) {
       case 'flipper_screen':
         return screenResult(call, ctx, await fz.currentFrame(), 'Tela atual.')
@@ -156,12 +226,7 @@ export async function runTool(call: ToolCall, ctx: ToolContext): Promise<ToolRes
         const raw = Array.isArray(a.keys) ? a.keys : typeof a.keys === 'string' ? String(a.keys).split(/[\s,]+/) : []
         if (raw.length === 0) throw new Error('informe ao menos uma tecla em "keys"')
         if (raw.length > MAX_KEYS) throw new Error(`no máximo ${MAX_KEYS} teclas por chamada`)
-        const parsed = raw.map((k) => {
-          const [name, mod] = String(k).toUpperCase().split(':')
-          if (!KEYS.includes(name as Key)) throw new Error(`tecla inválida: ${k} (use ${KEYS.join(', ')})`)
-          if (mod && mod !== 'LONG') throw new Error(`modificador inválido em ${k} (só ":long")`)
-          return { key: name as Key, long: mod === 'LONG' }
-        })
+        const parsed = parseKeys(raw)
         await fz.startScreen()
         let last: { frame: Frame | null; settled: boolean } = { frame: fz.screen.frame, settled: true }
         for (const [i, k] of parsed.entries()) {

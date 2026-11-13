@@ -4,12 +4,15 @@
 
 import { runTool } from '../src/agent/tools'
 import { FlipperClient } from '../src/flipper/client'
+import { FlipperLink } from '../src/flipper/link'
 import { encodeMain, F } from '../src/flipper/rpc'
 import { NodeSerialTransport } from './serial-node'
 
 const transport = await NodeSerialTransport.open(process.argv[2] ?? 'COM3')
 const fz = new FlipperClient(transport)
-const ctx = { fz, vision: false, signal: new AbortController().signal }
+const link = new FlipperLink()
+link.set(fz)
+const ctx = { link, vision: false, signal: new AbortController().signal }
 
 const casos: Array<{ name: string; args: Record<string, unknown>; esperaErro?: boolean }> = [
   { name: 'flipper_power_info', args: {} },
