@@ -11,16 +11,7 @@ import { useEffect, useState } from 'react'
  * Teclado aberto = a área visível ficou bem menor que a maior altura já vista nesta largura
  * (no iPhone `innerHeight` não muda com o teclado; no Android muda, por isso guardamos o máximo).
  */
-export interface VvSample {
-  inner: number
-  base: number
-  vvH: number
-  vvTop: number
-  scale: number
-  kb: boolean
-}
-
-export function useKeyboard(debug?: (s: VvSample) => void): boolean {
+export function useKeyboard(): boolean {
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -51,7 +42,6 @@ export function useKeyboard(debug?: (s: VvSample) => void): boolean {
         root.style.removeProperty('--app-y')
       }
       setOpen(kb)
-      if (debug) debug({ inner: window.innerHeight, base: baseHeight, vvH: Math.round(vv.height), vvTop: Math.round(vv.offsetTop), scale: vv.scale, kb })
     }
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(apply)

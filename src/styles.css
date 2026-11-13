@@ -103,21 +103,6 @@ button:disabled {
   padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
 }
 
-/* Diagnóstico ?vv: medidas da área visível, por cima de tudo, sem atrapalhar toques. */
-.vv-debug {
-  position: fixed;
-  top: calc(env(safe-area-inset-top) + 44px);
-  right: 8px;
-  z-index: 99;
-  margin: 0;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgb(0 0 0 / 0.75);
-  color: #7CFC9A;
-  font: 11px/1.35 ui-monospace, monospace;
-  pointer-events: none;
-}
-
 /* Digitando: só agora o app fica fixo e do tamanho da área VISÍVEL acima do teclado (useKeyboard),
    em vez de a página inteira ser empurrada para cima. O controle sai de cena; a tela continua à vista. */
 .app.typing {
