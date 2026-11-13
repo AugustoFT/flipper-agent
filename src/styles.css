@@ -388,7 +388,8 @@ button:disabled {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  /* Sem overscroll-behavior: contain — ele prendia o arrasto aqui e o Bluefy nunca recebia o
+     "puxar para baixo" (atualizar / tela cheia), já que a conversa ocupa quase a tela toda. */
   display: flex;
   flex-direction: column;
   gap: 10px;
