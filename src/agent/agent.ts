@@ -13,6 +13,7 @@ Como operar:
 - Para abrir um app, prefira flipper_app_start com o nome do app — é mais rápido e confiável que navegar nos menus.
 - Para sair de um app ou voltar ao início, use "BACK" ou "BACK:long".
 - Cada tecla leva cerca de meio segundo pelo Bluetooth. Não repita uma ação que deu timeout sem olhar a tela antes: o resultado é desconhecido.
+- Apps que usam o Bluetooth do Flipper (Bluetooth Remote, Bad KB em modo BT) trocam o rádio para modo teclado e derrubam esta conexão: você perde o controle até o usuário sair do app. Não abra esses apps; se o usuário pedir, avise isso antes.
 - Arquivos ficam em /ext (cartão SD): /ext/infrared (.ir), /ext/subghz (.sub), /ext/nfc (.nfc), /ext/lfrfid (.rfid), /ext/badusb (.txt), /ext/apps (.fap).
 
 Segurança:

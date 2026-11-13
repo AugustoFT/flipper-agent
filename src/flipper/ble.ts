@@ -96,6 +96,11 @@ export class BleTransport implements Transport {
     return this.device.name ?? 'Flipper'
   }
 
+  /** O aparelho escolhido na lista — guardado para reconectar sem perguntar de novo. */
+  get bluetoothDevice() {
+    return this.device
+  }
+
   /**
    * Abre o seletor de dispositivos do navegador, conecta e prepara as characteristics.
    * Na primeira vez o celular pede o PIN que aparece na tela do Flipper (pareamento).
@@ -118,6 +123,33 @@ export class BleTransport implements Transport {
       ),
     )
     log(`aparelho: "${device.name ?? '(sem nome)'}" id=${device.id}`)
+    return BleTransport.open(device, log)
+  }
+
+  /**
+   * Reconecta a um aparelho já escolhido, sem abrir a lista (a Web Bluetooth permite isso sem toque
+   * do usuário). Cada tentativa tem prazo: no iOS um connect a um aparelho ausente nunca termina sozinho.
+   */
+  static async reconnect(device: BluetoothDevice, log: (s: string) => void = () => {}, timeoutMs = 12000): Promise<BleTransport> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        if (device.gatt?.connected) device.gatt.disconnect()
+        reject(new Error('o Flipper não respondeu'))
+      }, timeoutMs)
+    })
+    try {
+      return await Promise.race([BleTransport.open(device, log), deadline])
+    } catch (e) {
+      // Conectou mas o serial não estava lá (Flipper ainda no modo teclado): solta para a próxima tentativa.
+      if (device.gatt?.connected) device.gatt.disconnect()
+      throw e
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  private static async open(device: BluetoothDevice, log: (s: string) => void): Promise<BleTransport> {
     const server = await step('conectar GATT', log, () => device.gatt!.connect())
     log('(se o iPhone pedir PIN, digite o que aparece na tela do Flipper)')
     const service = await step('abrir serviço serial', log, () => server.getPrimaryService(SERIAL_SERVICE))

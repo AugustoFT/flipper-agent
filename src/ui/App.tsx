@@ -8,6 +8,7 @@ import { BackgroundTest } from './BackgroundTest'
 import { Device } from './Screen'
 import { loadSettings, saveSettings, type Settings } from './settings'
 import { SettingsPanel } from './SettingsPanel'
+import { useKeyboard } from './useKeyboard'
 
 type ChatItem =
   | { kind: 'user'; text: string }
@@ -20,7 +21,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showBgTest, setShowBgTest] = useState(false)
   const [fz, setFz] = useState<FlipperClient | null>(null)
-  const [conn, setConn] = useState<'off' | 'connecting' | 'on'>('off')
+  const [conn, setConn] = useState<'off' | 'connecting' | 'reconnecting' | 'on'>('off')
   const [connLog, setConnLog] = useState('')
   const [connTrace, setConnTrace] = useState<string[]>([])
   const [battery, setBattery] = useState<string>('')
@@ -30,10 +31,11 @@ export function App() {
   const [busy, setBusy] = useState(false)
   const history = useRef<Msg[]>([])
   const abort = useRef<AbortController | null>(null)
-  const listEnd = useRef<HTMLDivElement>(null)
+  const chatRef = useRef<HTMLElement>(null)
+  const typing = useKeyboard()
+  /** Ficha da reconexão em andamento; `stop` interrompe o laço. */
+  const recon = useRef<{ stop: boolean } | null>(null)
 
-  // Corpo com chaves: um efeito só pode devolver uma função de limpeza (ou nada).
-  // scrollIntoView passou a devolver Promise em navegadores recentes; sem chaves, o React quebra.
   useEffect(() => {
     saveSettings(settings)
   }, [settings])
@@ -47,9 +49,12 @@ export function App() {
       setBattery('87')
     })
   }, [])
+  // Rola só a conversa (scrollIntoView rolaria também o documento, brigando com o teclado do iOS).
+  // Ao abrir o teclado a conversa encolhe: volta para a última mensagem.
   useEffect(() => {
-    listEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [items])
+    const el = chatRef.current
+    el?.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [items, typing])
 
   // Latência real do Bluetooth (ida e volta de um ping RPC), a cada 5 s enquanto o agente está parado.
   // Serve de "sinal de vida" visível e mantém a conexão aquecida.
@@ -77,6 +82,68 @@ export function App() {
   const patchTool = (id: string, patch: Partial<Extract<ChatItem, { kind: 'tool' }>>) =>
     setItems((xs) => xs.map((x) => (x.kind === 'tool' && x.id === id ? { ...x, ...patch } : x)))
 
+  /** Liga um transporte já aberto à interface. Usado na primeira conexão e em cada reconexão. */
+  function attach(t: BleTransport) {
+    const client = new FlipperClient(t)
+    t.onRpcState = (open) => add({ kind: 'info', text: open ? 'RPC reaberto.' : 'O Flipper fechou o RPC (bloqueado?). Desbloqueie para continuar.' })
+    t.onClose((reason) => {
+      setFz(null)
+      setLatency(null)
+      abort.current?.abort()
+      add({ kind: 'info', text: `Conexão caiu (${reason}). Tentando reconectar…` })
+      reconnectLoop(t.bluetoothDevice)
+    })
+    setFz(client)
+    setConn('on')
+    setConnLog('')
+    client
+      .powerInfo()
+      .then((p) => setBattery(p['charge.level'] ?? p['charge_level'] ?? ''))
+      .catch(() => {})
+  }
+
+  /**
+   * Abrir um app de Bluetooth no Flipper (Remote, Bad KB…) troca o rádio para o perfil de teclado e
+   * derruba o serial. Quando o app fecha, o serial volta — então insistimos no MESMO aparelho, sem
+   * abrir a lista, até ele aceitar. Intervalo crescente até 5 s; desiste em 10 min.
+   */
+  async function reconnectLoop(device: BluetoothDevice) {
+    if (recon.current) recon.current.stop = true
+    const token = { stop: false }
+    recon.current = token
+    setConn('reconnecting')
+    const started = Date.now()
+    for (let attempt = 1; !token.stop && Date.now() - started < 10 * 60_000; attempt++) {
+      setConnLog(`Tentativa ${attempt}…`)
+      try {
+        const t = await BleTransport.reconnect(device)
+        if (token.stop) {
+          t.close().catch(() => {})
+          return
+        }
+        recon.current = null
+        attach(t)
+        add({ kind: 'info', text: `Reconectado a ${t.name}.` })
+        return
+      } catch {
+        await new Promise((r) => setTimeout(r, Math.min(1000 * attempt, 5000)))
+      }
+    }
+    if (!token.stop) {
+      recon.current = null
+      setConn('off')
+      setConnLog('')
+      add({ kind: 'info', text: 'Não reconectou em 10 minutos. Toque em Conectar Flipper.' })
+    }
+  }
+
+  function stopReconnect() {
+    if (recon.current) recon.current.stop = true
+    recon.current = null
+    setConn('off')
+    setConnLog('')
+  }
+
   async function connect(showAll = settings.showAllDevices) {
     setConn('connecting')
     setConnLog('Abrindo a lista de dispositivos…')
@@ -89,29 +156,16 @@ export function App() {
     }
     try {
       const t = await BleTransport.connect(showAll, log)
-      const client = new FlipperClient(t)
-      t.onRpcState = (open) => add({ kind: 'info', text: open ? 'RPC reaberto.' : 'O Flipper fechou o RPC (bloqueado?). Desbloqueie para continuar.' })
-      t.onClose((reason) => {
-        setConn('off')
-        setFz(null)
-        abort.current?.abort()
-        add({ kind: 'info', text: `Conexão encerrada: ${reason}.` })
-      })
-      setFz(client)
-      setConn('on')
-      setConnLog('')
+      attach(t)
       add({ kind: 'info', text: `Conectado a ${t.name}.` })
-      client
-        .powerInfo()
-        .then((p) => setBattery(p['charge.level'] ?? p['charge_level'] ?? ''))
-        .catch(() => {})
     } catch (e) {
       // Nunca esconder o erro: um "cancelled" pode significar lista vazia, não só o usuário fechando.
       setConn('off')
       const err = e as Error
       trace.push(`ERRO FINAL ${err.name}: ${err.message}`)
       setConnTrace([...trace])
-      setConnLog(`Não conectou: ${err.message}\n${connectHint(err)}`)
+      setConnLog(`Não conectou: ${err.message}
+${connectHint(err)}`)
     }
   }
 
@@ -162,10 +216,12 @@ export function App() {
   const needsKey = settings.provider !== 'compat' && !settings.keys[settings.provider]
 
   return (
-    <div className="app">
+    <div className={`app${typing ? ' typing' : ''}`}>
       <header className="status">
-        <span className={`dot ${conn}`} aria-hidden="true" />
-        <span className="device-name">{conn === 'on' ? fz?.name : conn === 'connecting' ? 'Conectando' : 'Sem Flipper'}</span>
+        <span className={`dot ${conn === 'reconnecting' ? 'connecting' : conn}`} aria-hidden="true" />
+        <span className="device-name">
+          {conn === 'on' ? fz?.name : conn === 'connecting' ? 'Conectando' : conn === 'reconnecting' ? 'Reconectando' : 'Sem Flipper'}
+        </span>
         {conn === 'on' && (
           <span className="readouts">
             {latency !== null && <span title="Latência do Bluetooth (ida e volta)">{latency} ms</span>}
@@ -201,6 +257,20 @@ export function App() {
             <dd>Chrome ou Edge.</dd>
           </dl>
         </section>
+      ) : !fz && conn === 'reconnecting' ? (
+        <section className="onboard">
+          <div className="bezel">
+            <div className="lcd lcd-text">Reconectando…</div>
+          </div>
+          <p className="hint">
+            Se você abriu um app de Bluetooth no Flipper (Remote, Bad KB), ele trocou o rádio para modo teclado e a conexão
+            caiu. Saia do app no Flipper e a conexão volta sozinha.
+          </p>
+          {connLog && <p className="log">{connLog}</p>}
+          <button type="button" className="btn quiet wide" onClick={stopReconnect}>
+            Parar de tentar
+          </button>
+        </section>
       ) : !fz ? (
         <section className="onboard">
           <div className="bezel">
@@ -231,7 +301,7 @@ export function App() {
         <Device fz={fz} locked={busy} />
       )}
 
-      <main className="chat" aria-live="polite">
+      <main className="chat" aria-live="polite" ref={chatRef}>
         {items.length === 0 && fz && (
           <div className="chat-empty">
             {needsKey ? (
@@ -250,7 +320,6 @@ export function App() {
         {items.map((it, i) => (
           <ChatRow key={i} it={it} />
         ))}
-        <div ref={listEnd} />
       </main>
 
       <footer className="composer">
