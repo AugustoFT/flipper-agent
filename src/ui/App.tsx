@@ -47,7 +47,7 @@ export function App() {
   const [relayDetail, setRelayDetail] = useState('')
   const [approval, setApproval] = useState<{ client: string; host: string; answer: (ok: boolean) => void } | null>(null)
   const typing = useKeyboard()
-  useBottomGuard()
+  useBottomGuard(typing)
   /** Ficha da reconexão em andamento; `stop` interrompe o laço. */
   const recon = useRef<{ stop: boolean } | null>(null)
 
