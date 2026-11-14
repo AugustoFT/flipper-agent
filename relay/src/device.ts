@@ -17,7 +17,7 @@ export interface Env {
 }
 
 /** Resposta de `ask`: o que o celular mandou, ou por que não mandou. */
-export type AskOutcome<T> = { ok: true; value: T } | { ok: false; reason: 'offline' | 'timeout' | 'busy' }
+export type AskOutcome<T> = { ok: true; value: T } | { ok: false; reason: 'offline' | 'timeout' | 'busy' | 'limit' }
 
 const CALL_TIMEOUT_MS = 11 * 60_000 // passagem de bastão espera até 10 min no celular
 const APPROVE_TIMEOUT_MS = 90_000
@@ -80,8 +80,18 @@ export class Device extends DurableObject<Env> {
     return this.socket() !== null
   }
 
-  /** Executa uma ferramenta no celular e devolve o resultado. */
-  async call(name: string, args: Record<string, unknown>): Promise<AskOutcome<RelayToolResult>> {
+  /**
+   * Executa uma ferramenta no celular e devolve o resultado. Com `limit`, confere tudo aqui dentro,
+   * numa ida só ao objeto: celular online (chamada sem celular não gasta o limite), depois o limite.
+   * Cada ida a um Durable Object custa uma viagem de rede; três idas separadas dobravam o tempo.
+   */
+  async call(
+    name: string,
+    args: Record<string, unknown>,
+    limit?: { perHour: number; perDay: number },
+  ): Promise<AskOutcome<RelayToolResult>> {
+    if (!this.socket()) return { ok: false, reason: 'offline' }
+    if (limit && !(await this.consume(limit.perHour, limit.perDay))) return { ok: false, reason: 'limit' }
     const r = await this.ask({ t: 'call', name, args }, CALL_TIMEOUT_MS)
     if (!r.ok) return r
     return r.value.t === 'result' ? { ok: true, value: r.value.result } : { ok: false, reason: 'timeout' }

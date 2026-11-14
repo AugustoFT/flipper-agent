@@ -39,7 +39,10 @@ type JsonRpc = { jsonrpc: '2.0'; id?: string | number | null; method?: string; p
 
 const OFFLINE = 'Flipper Agent is not connected to the relay. On the phone: open the app, connect the Flipper and turn on Claude mode.'
 
-const toolError =(id: JsonRpc['id'], text: string) => rpcResult(id, { content: [{ type: 'text', text }], isError: true })
+/** Dia (desde 1970) em que o teto geral estourou, visto por este Worker. */
+let globalFullOn = -1
+
+const toolError = (id: JsonRpc['id'], text: string) => rpcResult(id, { content: [{ type: 'text', text }], isError: true })
 
 const mcpHandler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext & { props: Props }): Promise<Response> {
@@ -79,26 +82,34 @@ const mcpHandler = {
         if (!TOOL_SPECS.some((t) => t.name === name)) return rpcError(msg.id, -32602, `unknown tool: ${name}`)
         const args = (msg.params?.arguments ?? {}) as Record<string, unknown>
 
-        // Celular desligado primeiro: chamada que não chega ao Flipper não gasta o limite.
-        if (!(await device.online())) return toolError(msg.id, OFFLINE)
         // Limites: este relay é público e gratuito; sem eles, um uso descontrolado esgota o plano.
         const lim = limits(env)
-        if (!(await device.consume(lim.perHour, lim.perDay)))
-          return toolError(
-            msg.id,
-            `Usage limit reached for this device (${lim.perHour} tool calls per hour, ${lim.perDay} per day). ` +
-              `Wait a little, or deploy your own relay: ${REPO}#deploy-your-own-relay`,
-          )
-        const global = env.DEVICE.get(env.DEVICE.idFromName(GLOBAL_COUNTER))
-        if (!(await global.consume(Number.MAX_SAFE_INTEGER, lim.globalPerDay)))
+        const today = Math.floor(Date.now() / 86_400_000)
+        if (globalFullOn === today)
           return toolError(msg.id, `This public relay reached its daily limit. Try again tomorrow, or deploy your own relay: ${REPO}#deploy-your-own-relay`)
+        // O contador geral roda em paralelo, sem segurar a resposta: se ele estourar, as próximas
+        // chamadas deste Worker são recusadas até virar o dia. É um teto de proteção, não uma conta
+        // exata — vale a troca por não pagar mais uma viagem de rede em toda chamada.
+        const global = env.DEVICE.get(env.DEVICE.idFromName(GLOBAL_COUNTER))
+        ctx.waitUntil(
+          global
+            .consume(Number.MAX_SAFE_INTEGER, lim.globalPerDay)
+            .then((ok) => {
+              if (!ok) globalFullOn = today
+            })
+            .catch(() => {}),
+        )
 
-        const r = await device.call(name, args)
+        // Celular online + limite do aparelho + execução: tudo numa ida só ao objeto do aparelho.
+        const r = await device.call(name, args, { perHour: lim.perHour, perDay: lim.perDay })
         if (!r.ok) {
           const why =
             r.reason === 'offline'
               ? OFFLINE
-              :'The phone did not answer in time. It may have gone to the background: open the app (or the PiP window) and try again.'
+              : r.reason === 'limit'
+                ? `Usage limit reached for this device (${lim.perHour} tool calls per hour, ${lim.perDay} per day). ` +
+                  `Wait a little, or deploy your own relay: ${REPO}#deploy-your-own-relay`
+                : 'The phone did not answer in time. It may have gone to the background: open the app (or the PiP window) and try again.'
           return toolError(msg.id, why)
         }
         const content: unknown[] = [{ type: 'text', text: r.value.text }]
