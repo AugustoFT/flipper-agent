@@ -145,9 +145,10 @@ cd relay && npm run teste -- demo  # relay de ponta a ponta (suba `npx wrangler 
 - **[Flipper Relay](https://www.reddit.com/r/flipperzero/comments/1xrrwqf/flipper_relay_let_llms_control_flipper_zero/)**
   é onde este projeto começou: a ideia de deixar um modelo de IA operar o Flipper, e de um relay
   para o Claude alcançá-lo, veio desse post. Nenhum código foi tirado dele (não tive acesso ao
-  código); o Flipper Agent é uma implementação separada, com outro objetivo — uma página grátis que
-  roda no celular, iPhone inclusive. O Flipper Relay vai mais fundo no hardware a partir do
-  computador; se você precisa de acesso de baixo nível e processamento local, ele atende melhor.
+  código); o Flipper Agent é uma implementação separada, com outro objetivo — uma página grátis e
+  aberta, sem nada para instalar, iPhone inclusive. O Flipper Relay vai mais fundo no hardware e
+  deixa os seus próprios agentes trabalharem com ele; se você precisa desse acesso de baixo nível,
+  ele atende melhor.
 - **[zeffin](https://github.com/samartined/zeffin)** — os detalhes do protocolo RPC sobre BLE foram
   aprendidos com ele (veja abaixo).
 - Outros projetos que ligam modelos de IA ao Flipper e valem a visita:

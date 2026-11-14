@@ -146,9 +146,9 @@ cd relay && npm run teste -- demo  # relay end to end (start `npx wrangler dev` 
 - **[Flipper Relay](https://www.reddit.com/r/flipperzero/comments/1xrrwqf/flipper_relay_let_llms_control_flipper_zero/)**
   is where this project started: the idea of letting an LLM drive the Flipper, and of a relay so
   Claude can reach it, came from seeing that post. No code was taken from it (it wasn't available to
-  me); Flipper Agent is a separate implementation with a different goal — a free web page that runs
-  from the phone, including iPhone. Flipper Relay goes deeper into the hardware from a desktop; if
-  you need low-level access and local processing, it's the better fit.
+  me); Flipper Agent is a separate implementation with a different goal — a free, open-source web
+  page with nothing to install, iPhone included. Flipper Relay goes deeper into the hardware and
+  lets your own agents work with it; if you need that low-level access, it's the better fit.
 - **[zeffin](https://github.com/samartined/zeffin)** — the RPC-over-BLE protocol details were
   learned from it (see below).
 - Other projects that connect LLMs to the Flipper and are worth a look:
