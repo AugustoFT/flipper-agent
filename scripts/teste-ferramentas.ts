@@ -2,6 +2,7 @@
 // Só leitura + validações: nenhuma tecla é apertada e nada é gravado.
 // Uso: npm run teste:ferramentas -- COM3
 
+import { SCRIPT_SAFETY } from '../src/agent/safety'
 import { runTool } from '../src/agent/tools'
 import { FlipperClient } from '../src/flipper/client'
 import { FlipperLink } from '../src/flipper/link'
@@ -12,7 +13,7 @@ const transport = await NodeSerialTransport.open(process.argv[2] ?? 'COM3')
 const fz = new FlipperClient(transport)
 const link = new FlipperLink()
 link.set(fz)
-const ctx = { link, vision: false, signal: new AbortController().signal }
+const ctx = { link, vision: false, signal: new AbortController().signal, safety: SCRIPT_SAFETY }
 
 const casos: Array<{ name: string; args: Record<string, unknown>; esperaErro?: boolean }> = [
   { name: 'flipper_power_info', args: {} },

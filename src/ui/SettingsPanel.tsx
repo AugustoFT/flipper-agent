@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { listCompatModels, listGeminiModels, listOpenRouterFreeModels } from '../agent/providers'
+import { auditAsJson, clearAudit, loadAudit } from '../agent/audit'
+import type { SafetyMode } from '../agent/safety'
 import type { ModelInfo, ProviderId } from '../agent/types'
 import { formatCode } from '../relay-protocol'
 import { t, type LangSetting } from './i18n'
@@ -27,6 +29,15 @@ export function SettingsPanel(props: {
   const keyLabel = { gemini: L.keyLinkGemini, openrouter: L.keyLinkOpenRouter, compat: L.keyLinkCompat }[p]
 
   const set = (patch: Partial<Settings>) => props.onChange({ ...s, ...patch })
+  const [auditN, setAuditN] = useState(() => loadAudit().length)
+  const exportAudit = () => {
+    const url = URL.createObjectURL(new Blob([auditAsJson()], { type: 'application/json' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `flipper-agent-auditoria-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 5000)
+  }
 
   async function loadModels() {
     setStatus(L.fetchingModels)
@@ -141,6 +152,34 @@ export function SettingsPanel(props: {
           <input type="checkbox" checked={s.saveChat} onChange={(e) => set({ saveChat: e.target.checked })} />
           <span>{L.saveChat}</span>
         </label>
+
+        <label className="field">
+          <span>{L.safetyMode}</span>
+          <select value={s.safetyMode} onChange={(e) => set({ safetyMode: e.target.value as SafetyMode })}>
+            {(['confirm-high', 'confirm-all', 'readonly'] as SafetyMode[]).map((m) => (
+              <option key={m} value={m}>
+                {L.safetyModes[m]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="field">
+          <span>{L.auditTitle}</span>
+          <small>{L.auditCount(auditN)}</small>
+          <div className="approve-actions">
+            <button type="button" className="btn quiet" disabled={auditN === 0} onClick={exportAudit}>
+              {L.auditExport}
+            </button>
+            <button
+              type="button"
+              className="btn quiet"
+              disabled={auditN === 0}
+              onClick={() => (clearAudit(), setAuditN(0))}
+            >
+              {L.auditClear}
+            </button>
+          </div>
+        </div>
 
         <h3 className="sheet-sub">{L.claudeMode}</h3>
         <p className="note">{L.claudeNote}</p>

@@ -3,6 +3,7 @@
 
 import type { FlipperLink } from '../flipper/link'
 import { SYSTEM_PROMPT, TOOL_SPECS } from './specs'
+import type { SafetyCtx } from './safety'
 import { runTool } from './tools'
 import type { Msg, Provider, ToolCall, ToolResult } from './types'
 
@@ -22,6 +23,8 @@ export interface RunOptions {
   vision: boolean
   signal: AbortSignal
   maxSteps?: number
+  /** Política de segurança (modo + canal de confirmação). */
+  safety?: SafetyCtx
   events: AgentEvents
 }
 
@@ -52,6 +55,7 @@ export async function runTurn(history: Msg[], userText: string, o: RunOptions): 
         link: o.link,
         vision: o.vision,
         signal: o.signal,
+        safety: o.safety,
         onProgress: (m) => o.events.onToolProgress(call, m),
       })
       o.events.onToolEnd(r)

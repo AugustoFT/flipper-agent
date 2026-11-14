@@ -1,5 +1,6 @@
 // Teste da passagem de bastão (ferramentas esperando a reconexão) num Flipper real pelo USB.
 // Uso: npm run teste:bastao -- COM3
+import { SCRIPT_SAFETY } from '../src/agent/safety'
 import { runTool } from '../src/agent/tools'
 import { FlipperClient } from '../src/flipper/client'
 import { FlipperLink } from '../src/flipper/link'
@@ -9,7 +10,7 @@ import { encodeMain, F } from '../src/flipper/rpc'
 const link = new FlipperLink()
 const t = await NodeSerialTransport.open(process.argv[2] ?? 'COM3')
 const fz = new FlipperClient(t)
-const ctx = { link, vision: false, signal: new AbortController().signal, onProgress: (m: string) => console.log('  progresso:', m) }
+const ctx = { link, vision: false, signal: new AbortController().signal, safety: SCRIPT_SAFETY, onProgress: (m: string) => console.log('  progresso:', m) }
 
 // 1) Conexão "caída": a ferramenta espera; 1,5 s depois a conexão volta e ela termina.
 link.set(null)

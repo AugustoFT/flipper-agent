@@ -8,6 +8,7 @@ import { FlipperClient } from '../src/flipper/client'
 import { DemoTransport } from '../src/flipper/demo'
 import { FlipperLink } from '../src/flipper/link'
 import { encodeMain, F } from '../src/flipper/rpc'
+import { SCRIPT_SAFETY } from '../src/agent/safety'
 import { runTool } from '../src/agent/tools'
 import { NodeSerialTransport } from './serial-node'
 
@@ -17,7 +18,7 @@ const transport = demo ? new DemoTransport() : await NodeSerialTransport.open(po
 const fz = new FlipperClient(transport)
 const link = new FlipperLink()
 link.set(fz)
-const ctx = { link, vision: false, signal: new AbortController().signal }
+const ctx = { link, vision: false, signal: new AbortController().signal, safety: SCRIPT_SAFETY }
 let ok = 0
 let fail = 0
 const check = (cond: boolean, what: string, extra = '') => {

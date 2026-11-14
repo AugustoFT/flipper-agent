@@ -1,6 +1,7 @@
 // Configurações do usuário, salvas só neste aparelho (localStorage).
 // A chave da API nunca sai do celular, a não ser para o próprio provedor.
 
+import type { SafetyMode } from '../agent/safety'
 import type { ProviderId } from '../agent/types'
 import type { LangSetting } from './i18n'
 
@@ -20,6 +21,8 @@ export interface Settings {
   lang: LangSetting
   /** Guardar a conversa no aparelho para continuar depois. */
   saveChat: boolean
+  /** Quanto o agente pode fazer sozinho: só ler, confirmar o risco alto (padrão) ou confirmar tudo que mexe. */
+  safetyMode: SafetyMode
 }
 
 /** Servidor do relay publicado (Cloudflare Worker). Dá para trocar nas configurações. */
@@ -37,6 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
   relayUrl: RELAY_URL,
   lang: 'auto',
   saveChat: true,
+  safetyMode: 'confirm-high',
 }
 
 const STORAGE_KEY = 'flipper-agent:settings'
@@ -53,6 +57,7 @@ export function loadSettings(): Settings {
       models: { ...DEFAULT_SETTINGS.models, ...s.models },
       // Quem abriu o app antes do deploy tem "" salvo: vazio volta ao padrão.
       relayUrl: s.relayUrl || DEFAULT_SETTINGS.relayUrl,
+      safetyMode: ['readonly', 'confirm-high', 'confirm-all'].includes(s.safetyMode) ? s.safetyMode : DEFAULT_SETTINGS.safetyMode,
     }
   } catch {
     return DEFAULT_SETTINGS

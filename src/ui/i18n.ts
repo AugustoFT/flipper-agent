@@ -138,6 +138,23 @@ const pt = {
   approveA: ' quer controlar este Flipper. O acesso vai para ',
   approveNote: 'Aprove só se foi você quem acabou de conectar o Flipper no Claude.',
   approve: 'Aprovar',
+  // confirmação de ação (gate de segurança)
+  confirmTitle: 'Confirmar ação',
+  confirmRisk: 'Risco alto',
+  confirmFromLocal: 'Pedido pelo agente deste app.',
+  confirmFromClaude: 'Pedido pelo Claude (relay).',
+  confirmNote: 'Confira o que vai acontecer. Aprove só em aparelhos seus ou com autorização por escrito.',
+  confirmAllow: 'Permitir',
+  safetyMode: 'Segurança do agente',
+  safetyModes: {
+    readonly: 'Somente leitura (só observa)',
+    'confirm-high': 'Confirmar ações de risco alto (padrão)',
+    'confirm-all': 'Confirmar tudo que mexe no Flipper',
+  } as Record<string, string>,
+  auditTitle: 'Registro de auditoria',
+  auditCount: (n: number) => `${n} ações registradas neste aparelho.`,
+  auditExport: 'Exportar',
+  auditClear: 'Limpar',
   deny: 'Recusar',
 
   // configurações
@@ -332,6 +349,23 @@ const en: Strings = {
   approveA: ' wants to control this Flipper. Access goes to ',
   approveNote: 'Approve only if you just connected the Flipper in Claude yourself.',
   approve: 'Approve',
+  // action confirmation (safety gate)
+  confirmTitle: 'Confirm action',
+  confirmRisk: 'High risk',
+  confirmFromLocal: 'Requested by this app\'s agent.',
+  confirmFromClaude: 'Requested by Claude (relay).',
+  confirmNote: 'Check what is about to happen. Approve only on your own devices or with written authorization.',
+  confirmAllow: 'Allow',
+  safetyMode: 'Agent safety',
+  safetyModes: {
+    readonly: 'Read-only (observe only)',
+    'confirm-high': 'Confirm high-risk actions (default)',
+    'confirm-all': 'Confirm everything that touches the Flipper',
+  } as Record<string, string>,
+  auditTitle: 'Audit log',
+  auditCount: (n: number) => `${n} actions logged on this device.`,
+  auditExport: 'Export',
+  auditClear: 'Clear',
   deny: 'Deny',
 
   close: 'Close',
