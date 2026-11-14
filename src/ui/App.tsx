@@ -11,6 +11,8 @@ import { BackgroundTest } from './BackgroundTest'
 import { clearChat, loadChat, saveChat } from './chatStore'
 import { setLang, t } from './i18n'
 import { ApproveSheet, RelayBar } from './RelayBar'
+import { ConfirmSheet } from './ConfirmSheet'
+import type { Confirm, ConfirmRequest } from '../agent/safety'
 import { Device } from './Screen'
 import { loadSettings, saveSettings, type Settings } from './settings'
 import { SettingsPanel } from './SettingsPanel'
@@ -71,6 +73,26 @@ export function App() {
   const [relayState, setRelayState] = useState<RelayState>('off')
   const [relayDetail, setRelayDetail] = useState('')
   const [approval, setApproval] = useState<{ client: string; host: string; answer: (ok: boolean) => void } | null>(null)
+  // Fila de confirmações do gate de segurança: uma por vez, na ordem em que chegam.
+  type PendingConfirm = { req: ConfirmRequest; resolve: (ok: boolean) => void; done: boolean }
+  const confirmQueue = useRef<PendingConfirm[]>([])
+  const [confirmHead, setConfirmHead] = useState<PendingConfirm | null>(null)
+  const settleConfirm = useRef((p: PendingConfirm, ok: boolean) => {
+    if (p.done) return
+    p.done = true
+    p.resolve(ok)
+    confirmQueue.current = confirmQueue.current.filter((x) => x !== p)
+    setConfirmHead((h) => (h === p ? (confirmQueue.current[0] ?? null) : h))
+  }).current
+  const confirmAction = useRef<Confirm>((req) =>
+    new Promise<boolean>((resolve) => {
+      const p: PendingConfirm = { req, resolve, done: false }
+      confirmQueue.current.push(p)
+      setConfirmHead((h) => h ?? p)
+    }),
+  ).current
+  const safetyMode = useRef(settings.safetyMode)
+  safetyMode.current = settings.safetyMode
   const typing = useKeyboard()
   useBottomGuard(typing)
   const idle = useScreenIdle(fz, busy || claudeRunning > 0)
@@ -139,6 +161,7 @@ export function App() {
       return
     }
     const client = new RelayClient(settings.relayUrl, relayId, link, {
+      getSafety: () => ({ mode: safetyMode.current, confirm: confirmAction, source: 'claude' }),
       onState: (st, detail) => (setRelayState(st), setRelayDetail(detail ?? '')),
       onApprove: (clientName, host) =>
         new Promise<boolean>((resolve) => {
@@ -309,6 +332,7 @@ ${connectHint(err)}`)
         link,
         vision: settings.vision,
         signal: ctrl.signal,
+        safety: { mode: settings.safetyMode, confirm: confirmAction, source: 'local' },
         events: {
           onText: (t) => add({ kind: 'agent', text: t }),
           onToolStart: (c) => add({ kind: 'tool', id: c.id, label: toolLabel(c.name), detail: describeArgs(c.args), running: true }),
@@ -528,6 +552,7 @@ ${connectHint(err)}`)
         />
       )}
       {showSafety && <SafetySheet onClose={() => setShowSafety(false)} />}
+      {confirmHead && <ConfirmSheet req={confirmHead.req} onAnswer={(ok) => settleConfirm(confirmHead, ok)} />}
       {approval && <ApproveSheet client={approval.client} host={approval.host} onAnswer={approval.answer} />}
     </div>
   )

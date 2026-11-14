@@ -9,6 +9,8 @@ import { t } from '../ui/i18n'
 import type { FlipperLink } from '../flipper/link'
 import { toText, type Frame } from '../flipper/screen'
 import { frameToPngBase64 } from './image'
+import { finishAudit } from './audit'
+import { DEFAULT_SAFETY, gate, type SafetyCtx } from './safety'
 import type { ToolCall, ToolResult } from './types'
 
 export { TOOL_SPECS } from './specs'
@@ -44,7 +46,7 @@ async function handoff(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   const a = call.args
   const message = str(a.message, 'message')
   const keys = Array.isArray(a.keys) ? parseKeys(a.keys) : []
-  const appArgs = typeof a.app_args === 'string' && a.app_args.trim() ? checkPath(a.app_args.trim()) : ''
+  const appArgs = typeof a.app_args === 'string' && a.app_args.trim() ? checkAppArgs(a.app_args) : ''
   const before = await connected(ctx)
   ctx.onProgress?.(message)
   try {
@@ -160,9 +162,29 @@ function str(v: unknown, name: string): string {
 }
 
 function checkPath(p: string): string {
-  if (!p.startsWith('/ext') && !p.startsWith('/int')) throw new Error('o caminho precisa começar com /ext ou /int')
-  if (p.includes('..')) throw new Error('caminho com ".." não é permitido')
-  return p.replace(/\/+$/, '') || '/'
+  const clean = p.trim().replace(/\/{2,}/g, '/')
+  // Prefixo exato: "/extra" ou "/internal" não valem; só /ext, /int ou subpastas deles.
+  if (!/^\/(ext|int)(\/|$)/.test(clean)) throw new Error('o caminho precisa começar com /ext ou /int')
+  if (clean.split('/').some((seg) => seg === '..' || seg === '.')) throw new Error('caminho com ".." ou "." não é permitido')
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(clean)) throw new Error('caminho com caractere de controle não é permitido')
+  return clean.replace(/\/+$/, '') || '/'
+}
+
+/** Para escrever, apagar, renomear ou criar: só o cartão SD (/ext). O /int guarda o sistema do Flipper. */
+function checkWritable(p: string): string {
+  const clean = checkPath(p)
+  if (!/^\/ext(\/|$)/.test(clean)) throw new Error('só é permitido alterar arquivos no cartão SD (/ext); /int é somente leitura')
+  return clean
+}
+
+/** Argumentos de app: curtos, sem caractere de controle; se for caminho, passa pelo checkPath. */
+function checkAppArgs(raw: string): string {
+  const v = raw.trim()
+  if (v.length > 256) throw new Error('args longo demais (máximo 256 caracteres)')
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(v)) throw new Error('args com caractere de controle não é permitido')
+  return v.startsWith('/') ? checkPath(v) : v
 }
 
 export interface ToolContext {
@@ -171,6 +193,8 @@ export interface ToolContext {
   signal: AbortSignal
   /** Avisa a interface a cada tecla, para mostrar o progresso. */
   onProgress?: (msg: string) => void
+  /** Política de segurança (modo, canal de confirmação, origem). Sem isso: padrão fail-closed. */
+  safety?: SafetyCtx
 }
 
 function screenResult(call: ToolCall, ctx: ToolContext, frame: Frame | null, prefix: string): ToolResult {
@@ -193,7 +217,7 @@ async function connected(ctx: ToolContext): Promise<FlipperClient> {
   return ctx.link.current
 }
 
-export async function runTool(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+async function execTool(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   const a = call.args
   const ok = (text: string): ToolResult => ({ id: call.id, name: call.name, text })
   try {
@@ -230,7 +254,7 @@ export async function runTool(call: ToolCall, ctx: ToolContext): Promise<ToolRes
 
       case 'flipper_app_start': {
         const name = str(a.name, 'name')
-        const args = typeof a.args === 'string' ? a.args : ''
+        const args = typeof a.args === 'string' ? checkAppArgs(a.args) : ''
         await fz.startScreen()
         const before = fz.screen.currentSeq
         await fz.appStart(name, args)
@@ -267,7 +291,7 @@ export async function runTool(call: ToolCall, ctx: ToolContext): Promise<ToolRes
       }
 
       case 'flipper_write': {
-        const path = checkPath(str(a.path, 'path'))
+        const path = checkWritable(str(a.path, 'path'))
         const content = typeof a.content === 'string' ? a.content : ''
         const bytes = new TextEncoder().encode(content)
         await fz.write(path, bytes)
@@ -275,21 +299,21 @@ export async function runTool(call: ToolCall, ctx: ToolContext): Promise<ToolRes
       }
 
       case 'flipper_mkdir': {
-        const path = checkPath(str(a.path, 'path'))
+        const path = checkWritable(str(a.path, 'path'))
         await fz.mkdir(path)
         return ok(`Pasta criada: ${path}`)
       }
 
       case 'flipper_delete': {
-        const path = checkPath(str(a.path, 'path'))
-        if (path === '/ext' || path === '/int') throw new Error('não apago a raiz do armazenamento')
+        const path = checkWritable(str(a.path, 'path'))
+        if (path === '/ext') throw new Error('não apago a raiz do armazenamento')
         await fz.remove(path, a.recursive === true)
         return ok(`Apagado: ${path}`)
       }
 
       case 'flipper_rename': {
-        const from = checkPath(str(a.from, 'from'))
-        const to = checkPath(str(a.to, 'to'))
+        const from = checkWritable(str(a.from, 'from'))
+        const to = checkWritable(str(a.to, 'to'))
         await fz.rename(from, to)
         return ok(`Renomeado: ${from} → ${to}`)
       }
@@ -313,4 +337,16 @@ export async function runTool(call: ToolCall, ctx: ToolContext): Promise<ToolRes
     // Sem nova tentativa automática: um timeout deixa o resultado desconhecido. O modelo deve olhar a tela antes de repetir.
     return { id: call.id, name: call.name, text: `${(e as Error).message}. Olhe a tela antes de tentar de novo.`, isError: true }
   }
+}
+
+/**
+ * Ponto de entrada único das ferramentas (agente local, Claude pelo relay e scripts).
+ * O gate roda ANTES de tocar no Flipper: risco, modo somente leitura, confirmação e auditoria.
+ */
+export async function runTool(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+  const g = await gate(call, ctx.safety ?? DEFAULT_SAFETY, ctx.signal)
+  if (!g.ok) return { id: call.id, name: call.name, text: g.text, isError: true }
+  const r = await execTool(call, ctx)
+  finishAudit(g.auditT, !r.isError)
+  return r
 }

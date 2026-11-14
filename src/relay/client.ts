@@ -2,6 +2,7 @@
 // ferramentas que o Claude pede — com o MESMO runTool que o agente Gemini usa, então as regras de
 // segurança (dados do Flipper marcados como não confiáveis, caminhos checados) valem igual.
 
+import type { SafetyCtx } from '../agent/safety'
 import { runTool } from '../agent/tools'
 import type { ToolCall, ToolResult } from '../agent/types'
 import type { FlipperLink } from '../flipper/link'
@@ -66,6 +67,8 @@ export function resetIdentity(): RelayIdentity {
 }
 
 export interface RelayEvents {
+  /** Política de segurança vigente (lida a cada chamada do Claude, para valer a mudança nas configurações). */
+  getSafety?(): SafetyCtx
   onState(state: RelayState, detail?: string): void
   /** O Claude pediu para conectar: devolva true para aprovar. */
   onApprove(client: string, redirectHost: string): Promise<boolean>
@@ -159,7 +162,7 @@ export class RelayClient {
   private async runCall(id: string, name: string, args: Record<string, unknown>) {
     const call: ToolCall = { id, name, args }
     this.ev.onToolStart(call)
-    const r = await runTool(call, { link: this.link, vision: this.vision, signal: this.abort.signal })
+    const r = await runTool(call, { link: this.link, vision: this.vision, signal: this.abort.signal, safety: this.ev.getSafety?.() })
     this.ev.onToolEnd(r)
     this.send({ t: 'result', id, result: { text: r.text, image: r.image, isError: r.isError } })
   }

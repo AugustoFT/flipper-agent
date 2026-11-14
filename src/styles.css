@@ -818,3 +818,46 @@ select {
 .sheet-body > p {
   margin: 0;
 }
+
+/* ---------- confirmação de ação (gate de segurança) ---------- */
+
+.risk-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #b3261e;
+  color: #fff;
+  font-size: var(--step--1);
+  letter-spacing: 0.02em;
+}
+.confirm-details {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.05);
+  max-height: 34dvh;
+  overflow-y: auto;
+}
+.confirm-details div {
+  display: grid;
+  gap: 2px;
+}
+.confirm-details dt {
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+.confirm-details dd {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: var(--step--1);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.confirm-actions .btn {
+  min-height: 52px;
+}
+.confirm-actions .btn:disabled {
+  opacity: 0.5;
+}
