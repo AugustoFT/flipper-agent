@@ -16,6 +16,8 @@ Flipper Zero  ⇄  BLE ou USB  ⇄  celular (esta página)  ⇄  HTTPS  ⇄  Gem
 
 [English](README.md)
 
+Inspirado no [Flipper Relay](https://www.reddit.com/r/flipperzero/comments/1xrrwqf/flipper_relay_let_llms_control_flipper_zero/) — veja [Inspiração e créditos](#inspiração-e-créditos).
+
 ## O que faz
 
 Peça em linguagem normal — "abra o Infravermelho e me diga quais controles eu tenho salvos", "o que
@@ -137,6 +139,22 @@ npm run teste:ferramentas -- COM3
 npm run teste:cabo -- COM3       # o transporte USB do navegador sobre uma porta real
 cd relay && npm run teste -- demo  # relay de ponta a ponta (suba `npx wrangler dev` antes)
 ```
+
+## Inspiração e créditos
+
+- **[Flipper Relay](https://www.reddit.com/r/flipperzero/comments/1xrrwqf/flipper_relay_let_llms_control_flipper_zero/)**
+  é onde este projeto começou: a ideia de deixar um modelo de IA operar o Flipper, e de um relay
+  para o Claude alcançá-lo, veio desse post. Nenhum código foi tirado dele (não tive acesso ao
+  código); o Flipper Agent é uma implementação separada, com outro objetivo — uma página grátis que
+  roda no celular, iPhone inclusive. O Flipper Relay vai mais fundo no hardware a partir do
+  computador; se você precisa de acesso de baixo nível e processamento local, ele atende melhor.
+- **[zeffin](https://github.com/samartined/zeffin)** — os detalhes do protocolo RPC sobre BLE foram
+  aprendidos com ele (veja abaixo).
+- Outros projetos que ligam modelos de IA ao Flipper e valem a visita:
+  [V3SP3R](https://github.com/elder-plinius/V3SP3R) (Android, BLE),
+  [AgentFlipper](https://github.com/mattyspangler/AgentFlipper) (Python, USB),
+  [PromptZero](https://github.com/xunholy/promptzero) (USB, Claude) e
+  [flipper-mcp](https://github.com/roostercoopllc/flipper-mcp) (servidor MCP na placa WiFi).
 
 ## Como funciona
 

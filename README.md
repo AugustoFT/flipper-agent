@@ -16,6 +16,8 @@ Flipper Zero  ⇄  BLE or USB  ⇄  phone (this page)  ⇄  HTTPS  ⇄  Gemini /
 
 [Português](README.pt-BR.md)
 
+Inspired by [Flipper Relay](https://www.reddit.com/r/flipperzero/comments/1xrrwqf/flipper_relay_let_llms_control_flipper_zero/) — see [Inspiration and credits](#inspiration-and-credits).
+
 ## What it does
 
 Ask in plain language — "open Infrared and tell me which remotes I have saved", "what's on the SD
@@ -138,6 +140,22 @@ npm run teste:ferramentas -- COM3
 npm run teste:cabo -- COM3       # the browser USB transport over a real port
 cd relay && npm run teste -- demo  # relay end to end (start `npx wrangler dev` first)
 ```
+
+## Inspiration and credits
+
+- **[Flipper Relay](https://www.reddit.com/r/flipperzero/comments/1xrrwqf/flipper_relay_let_llms_control_flipper_zero/)**
+  is where this project started: the idea of letting an LLM drive the Flipper, and of a relay so
+  Claude can reach it, came from seeing that post. No code was taken from it (it wasn't available to
+  me); Flipper Agent is a separate implementation with a different goal — a free web page that runs
+  from the phone, including iPhone. Flipper Relay goes deeper into the hardware from a desktop; if
+  you need low-level access and local processing, it's the better fit.
+- **[zeffin](https://github.com/samartined/zeffin)** — the RPC-over-BLE protocol details were
+  learned from it (see below).
+- Other projects that connect LLMs to the Flipper and are worth a look:
+  [V3SP3R](https://github.com/elder-plinius/V3SP3R) (Android, BLE),
+  [AgentFlipper](https://github.com/mattyspangler/AgentFlipper) (Python, USB),
+  [PromptZero](https://github.com/xunholy/promptzero) (USB, Claude) and
+  [flipper-mcp](https://github.com/roostercoopllc/flipper-mcp) (MCP server on the WiFi dev board).
 
 ## How it works
 
