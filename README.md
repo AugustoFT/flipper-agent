@@ -28,6 +28,11 @@ with the small remote at any time.
 - Sees the screen (as an image, or as text art for text-only models)
 - Presses keys (short/long), opens apps by name, exits apps
 - Lists, reads, writes, renames and deletes files on the SD card; device and battery info
+- **Drives apps directly over RPC**, no menus — the same path the official mobile app uses: opens
+  Infrared, Sub-GHz, NFC, 125 kHz RFID or iButton in RPC mode, loads a saved file and triggers a
+  signal by name or index (or keeps a card emulating for a set time)
+- **GPIO**: reads and writes the header pins (3.3 V logic), with pull-up/down, and switches the 5 V
+  output on pin 1 — only when you ask, and it tells you which pin first
 - **Hand-off** for apps that take over the Flipper's Bluetooth (Bad KB, Bluetooth Remote): it gets
   everything ready, tells you what to do on the Flipper, and waits for the connection to come back
 - Reconnects by itself when the link drops; the agent's task keeps going
@@ -138,6 +143,8 @@ Flipper over USB (read-only unless stated):
 npm run teste:usb -- COM3
 npm run teste:ferramentas -- COM3
 npm run teste:cabo -- COM3       # the browser USB transport over a real port
+npm run teste:rpc-gpio           # app RPC and GPIO tools on the simulated Flipper
+npm run teste:rpc-gpio -- COM3   # same, read-only, on a real Flipper (transmits nothing)
 cd relay && npm run teste -- demo  # relay end to end (start `npx wrangler dev` first)
 ```
 
@@ -170,6 +177,9 @@ the understanding of the protocol) and from the firmware's `.proto` files:
 - **USB**: Web Serial (computers) or WebUSB (Android), CDC-ACM; the CLI is switched to RPC with
   `start_rpc_session` (`src/flipper/usb.ts`).
 - **Keys**: `PRESS → SHORT/LONG → RELEASE` in one batch; any other order is dropped by the firmware.
+- **App RPC**: `StartRequest` with args `"RPC"` puts an app in RPC mode (`rpc_app.c` in the
+  firmware), then `AppLoadFile` and `AppButtonPress`/`Release`; errors come as
+  `ERROR_APP_CMD_ERROR` and the real reason is fetched with `GetError`.
 - **Screen**: 128×64, 1 bit, packed vertically (8 rows per byte). After a key press it waits 250 ms
   without a new frame (1.5 s cap), because some animations never stop.
 

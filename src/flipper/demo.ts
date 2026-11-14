@@ -16,6 +16,12 @@ export class DemoTransport implements Transport {
   private stream: ReturnType<typeof setInterval> | undefined
   private sel = 0
   private lastKey = ''
+  // Apps em modo RPC e GPIO simulados: guardam o estado e o que foi feito (os testes leem `log`).
+  private rpcApp: string | null = null
+  private loaded: string | null = null
+  private pins = new Map<number, { mode: number; pull: number; level: number }>()
+  private otg = false
+  readonly log: string[] = []
 
   onData(h: (c: Uint8Array) => void) {
     this.data.push(h)
@@ -32,8 +38,9 @@ export class DemoTransport implements Transport {
       if (m.field === F.guiStartScreenStream && !this.stream) this.stream = setInterval(() => this.frame(), 100)
       if (m.field === F.guiStopScreenStream) clearInterval(this.stream), (this.stream = undefined)
       if (m.field === F.guiSendInputEvent) this.input(m.body)
+      const [status, build] = this.handle(m.field, m.body)
       // Pequeno atraso, como o rádio: ~40 ms.
-      setTimeout(() => this.emit(this.reply(m.id, m.field)), 40)
+      setTimeout(() => this.emit(this.reply(m.id, m.field, status, build)), 40)
     }
   }
 
@@ -52,9 +59,67 @@ export class DemoTransport implements Transport {
     this.frame()
   }
 
-  private reply(id: number, field: number): Uint8Array {
+  /** Apps em modo RPC e GPIO: devolve o status (0 = OK) e, se houver, a resposta. */
+  private handle(field: number, body: Uint8Array): [number, ((w: PbWriter) => void)?] {
+    const f: Record<number, { int: number; str: string }> = {}
+    for (const x of fields(body)) f[x.field] = { int: x.int, str: x.wire === 2 ? new TextDecoder().decode(x.data) : '' }
+    const pin = (n: number) => this.pins.get(n) ?? { mode: 0, pull: 0, level: 0 }
+    switch (field) {
+      case F.appStartRequest:
+        this.rpcApp = f[2]?.str === 'RPC' ? (f[1]?.str ?? '') : null
+        this.loaded = null
+        this.log.push(`start ${f[1]?.str} ${f[2]?.str ?? ''}`.trim())
+        return [0]
+      case F.appLoadFileRequest:
+        if (!this.rpcApp) return [21] // ERROR_APP_NOT_RUNNING
+        this.loaded = f[1]?.str ?? ''
+        this.log.push(`load ${this.loaded}`)
+        return [0]
+      case F.appButtonPressRequest:
+        if (!this.loaded) return [22] // ERROR_APP_CMD_ERROR
+        this.log.push(`press ${f[1]?.str || `#${f[2]?.int ?? 0}`}`)
+        return [0]
+      case F.appButtonReleaseRequest:
+        this.log.push('release')
+        return [0]
+      case F.appExitRequest:
+        this.log.push('exit')
+        this.rpcApp = this.loaded = null
+        return [0]
+      case F.appGetErrorRequest:
+        return [0, (w) => w.message(F.appGetErrorResponse, (b) => b.uint(1, 1).string(2, 'demo: nenhum arquivo carregado'))]
+      case F.gpioSetPinMode:
+        this.pins.set(f[1]?.int ?? 0, { ...pin(f[1]?.int ?? 0), mode: f[2]?.int ?? 0 })
+        return [0]
+      case F.gpioSetInputPull:
+        this.pins.set(f[1]?.int ?? 0, { ...pin(f[1]?.int ?? 0), pull: f[2]?.int ?? 0 })
+        return [0]
+      case F.gpioWritePin:
+        this.pins.set(f[1]?.int ?? 0, { ...pin(f[1]?.int ?? 0), level: f[2]?.int ?? 0 })
+        this.log.push(`write ${f[1]?.int ?? 0}=${f[2]?.int ?? 0}`)
+        return [0]
+      case F.gpioReadPin: {
+        const p = pin(f[1]?.int ?? 0)
+        const level = p.mode === 1 ? (p.pull === 1 ? 1 : 0) : p.level // entrada solta: pull UP lê 1
+        return [0, (w) => w.message(F.gpioReadPinResponse, (b) => b.uint(2, level))]
+      }
+      case F.gpioGetPinMode:
+        return [0, (w) => w.message(F.gpioGetPinModeResponse, (b) => b.uint(1, pin(f[1]?.int ?? 0).mode))]
+      case F.gpioGetOtgMode:
+        return [0, (w) => w.message(F.gpioGetOtgModeResponse, (b) => b.uint(1, this.otg ? 1 : 0))]
+      case F.gpioSetOtgMode:
+        this.otg = (f[1]?.int ?? 0) === 1
+        this.log.push(`otg ${this.otg ? 'on' : 'off'}`)
+        return [0]
+    }
+    return [0]
+  }
+
+  private reply(id: number, field: number, status = 0, build?: (w: PbWriter) => void): Uint8Array {
     const w = new PbWriter().uint(1, id)
-    if (field === F.pingRequest) w.message(F.pingResponse, () => {})
+    if (status) w.uint(2, status)
+    if (build) build(w)
+    else if (field === F.pingRequest) w.message(F.pingResponse, () => {})
     else if (field === F.powerInfoRequest) w.message(F.powerInfoResponse, (b) => b.string(1, 'charge.level').string(2, '87'))
     else w.message(F.empty, () => {})
     const main = w.finish()

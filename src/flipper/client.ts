@@ -11,6 +11,12 @@ const KEY_CODE: Record<Key, number> = { UP: 0, DOWN: 1, RIGHT: 2, LEFT: 3, OK: 4
 const INPUT = { PRESS: 0, RELEASE: 1, SHORT: 2, LONG: 3, REPEAT: 4 } as const
 export type InputType = keyof typeof INPUT
 
+/** Pinos que o RPC controla, na ordem do enum GpioPin do protobuf (o índice é o valor no fio). */
+export const GPIO_PINS = ['PC0', 'PC1', 'PC3', 'PB2', 'PB3', 'PA4', 'PA6', 'PA7'] as const
+export type GpioPin = (typeof GPIO_PINS)[number]
+/** Número do pino no conector de cima do Flipper, para explicar ao usuário onde ligar. */
+export const GPIO_HEADER: Record<GpioPin, number> = { PA7: 2, PA6: 3, PA4: 4, PB3: 5, PB2: 6, PC3: 7, PC1: 15, PC0: 16 }
+
 export interface FileEntry {
   name: string
   dir: boolean
@@ -131,6 +137,81 @@ export class FlipperClient {
   /** Só funciona em apps com suporte a RPC; para os outros, o agente usa BACK (longo). */
   async appExit() {
     await this.rpc.request('fechar_app', F.appExitRequest)
+  }
+
+  // ---------- apps em modo RPC ----------
+  // Apps como Infravermelho, Sub-GHz, NFC, RFID e iButton aceitam ser comandados direto, sem menus:
+  // abertos com o argumento "RPC", carregam um arquivo e "apertam" um botão (no infravermelho, o nome
+  // de um sinal do .ir; no Sub-GHz, transmite o .sub; em NFC/RFID/iButton, carregar já emula).
+  // É o mesmo caminho do app oficial do celular. Fonte: rpc_app.c do firmware.
+
+  /** Abre o app em modo RPC (a tela do Flipper mostra que ele está sendo comandado de fora). */
+  async appStartRpc(name: string) {
+    await this.appStart(name, 'RPC')
+  }
+
+  async appLoadFile(path: string) {
+    await this.rpc.request('carregar_arquivo', F.appLoadFileRequest, (w) => w.string(1, path), { timeoutMs: 15000 })
+  }
+
+  /** "Aperta" um botão do app: por nome (`args`, ex.: o sinal "Power" de um .ir) ou por índice. */
+  async appButtonPress(args: string, index = 0) {
+    await this.rpc.request('botao_app', F.appButtonPressRequest, (w) => w.string(1, args).uint(2, index), { timeoutMs: 15000 })
+  }
+
+  async appButtonRelease() {
+    await this.rpc.request('soltar_botao_app', F.appButtonReleaseRequest, undefined, { timeoutMs: 15000 })
+  }
+
+  /** Último erro do app em modo RPC (código e texto), para explicar um ERROR_APP_CMD_ERROR. */
+  async appGetError(): Promise<{ code: number; text: string }> {
+    const [p] = await this.rpc.request('erro_app', F.appGetErrorRequest)
+    let code = 0
+    let text = ''
+    for (const f of fields(p.body)) {
+      if (f.field === 1) code = f.int
+      else if (f.field === 2 && f.wire === 2) text = new TextDecoder().decode(f.data)
+    }
+    return { code, text }
+  }
+
+  // ---------- GPIO (pinos do conector de cima) ----------
+  // Pinos expostos pelo RPC, na ordem do enum GpioPin do protobuf. O número físico do conector vem
+  // ao lado (2=PA7, 3=PA6, 4=PA4, 5=PB3, 6=PB2, 7=PC3, 15=PC1, 16=PC0).
+
+  async gpioSetMode(pin: GpioPin, mode: 'OUTPUT' | 'INPUT') {
+    await this.rpc.request('gpio_modo', F.gpioSetPinMode, (w) => w.uint(1, GPIO_PINS.indexOf(pin)).uint(2, mode === 'INPUT' ? 1 : 0))
+  }
+
+  async gpioSetPull(pin: GpioPin, pull: 'NO' | 'UP' | 'DOWN') {
+    await this.rpc.request('gpio_pull', F.gpioSetInputPull, (w) => w.uint(1, GPIO_PINS.indexOf(pin)).uint(2, ['NO', 'UP', 'DOWN'].indexOf(pull)))
+  }
+
+  async gpioGetMode(pin: GpioPin): Promise<'OUTPUT' | 'INPUT'> {
+    const [p] = await this.rpc.request('gpio_ler_modo', F.gpioGetPinMode, (w) => w.uint(1, GPIO_PINS.indexOf(pin)))
+    for (const f of fields(p.body)) if (f.field === 1) return f.int === 1 ? 'INPUT' : 'OUTPUT'
+    return 'OUTPUT' // proto3 não manda o valor 0
+  }
+
+  async gpioRead(pin: GpioPin): Promise<number> {
+    const [p] = await this.rpc.request('gpio_ler', F.gpioReadPin, (w) => w.uint(1, GPIO_PINS.indexOf(pin)))
+    for (const f of fields(p.body)) if (f.field === 2) return f.int // ReadPinResponse.value é o campo 2
+    return 0
+  }
+
+  async gpioWrite(pin: GpioPin, value: 0 | 1) {
+    await this.rpc.request('gpio_escrever', F.gpioWritePin, (w) => w.uint(1, GPIO_PINS.indexOf(pin)).uint(2, value))
+  }
+
+  /** Saída de 5 V do pino 1 (OTG): liga ou desliga a alimentação de um módulo externo. */
+  async gpioGetOtg(): Promise<boolean> {
+    const [p] = await this.rpc.request('otg_ler', F.gpioGetOtgMode)
+    for (const f of fields(p.body)) if (f.field === 1) return f.int === 1
+    return false
+  }
+
+  async gpioSetOtg(on: boolean) {
+    await this.rpc.request('otg_mudar', F.gpioSetOtgMode, (w) => w.uint(1, on ? 1 : 0))
   }
 
   async isLocked(): Promise<boolean> {

@@ -28,6 +28,11 @@ momento pelo controle pequeno.
 - Vê a tela (como imagem, ou como desenho em texto para modelos sem visão)
 - Aperta teclas (curto/longo), abre apps pelo nome, fecha apps
 - Lista, lê, grava, renomeia e apaga arquivos do SD; informações do aparelho e da bateria
+- **Comanda apps direto pelo RPC**, sem menus — o mesmo caminho do app oficial do celular: abre
+  Infravermelho, Sub-GHz, NFC, 125 kHz RFID ou iButton em modo RPC, carrega um arquivo salvo e
+  dispara um sinal pelo nome ou pela posição (ou mantém um cartão emulando por um tempo)
+- **GPIO**: lê e escreve os pinos do conector (lógica de 3,3 V), com pull-up/down, e liga a saída
+  de 5 V do pino 1 — só quando você pede, e avisa antes qual pino
 - **Passagem de bastão** para apps que tomam o Bluetooth do Flipper (Bad KB, Bluetooth Remote):
   deixa tudo pronto, explica o que fazer no Flipper e espera a conexão voltar
 - Reconecta sozinho quando a conexão cai, sem interromper a tarefa do agente
@@ -137,6 +142,8 @@ real pelo USB (só leitura, salvo indicação):
 npm run teste:usb -- COM3
 npm run teste:ferramentas -- COM3
 npm run teste:cabo -- COM3       # o transporte USB do navegador sobre uma porta real
+npm run teste:rpc-gpio           # ferramentas de RPC de apps e GPIO no Flipper simulado
+npm run teste:rpc-gpio -- COM3   # o mesmo, só leitura, num Flipper real (não transmite nada)
 cd relay && npm run teste -- demo  # relay de ponta a ponta (suba `npx wrangler dev` antes)
 ```
 
@@ -170,6 +177,9 @@ copiado, só o entendimento do protocolo) e dos `.proto` do firmware:
 - **USB**: Web Serial (computador) ou WebUSB (Android), CDC-ACM; o terminal vira RPC com
   `start_rpc_session` (`src/flipper/usb.ts`).
 - **Teclas**: `PRESS → SHORT/LONG → RELEASE` num envio só; outra ordem é descartada pelo firmware.
+- **RPC de apps**: `StartRequest` com o argumento `"RPC"` põe o app em modo RPC (`rpc_app.c` no
+  firmware); depois vêm `AppLoadFile` e `AppButtonPress`/`Release`. Os erros chegam como
+  `ERROR_APP_CMD_ERROR`, e o motivo de verdade é buscado com `GetError`.
 - **Tela**: 128×64, 1 bit, empacotada na vertical (8 linhas por byte). Depois de apertar, espera
   250 ms sem quadro novo (teto 1,5 s) porque algumas animações nunca param.
 

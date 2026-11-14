@@ -4,7 +4,7 @@
 // texto da tela, info do aparelho) volta marcado como DADO NÃO CONFIÁVEL. Um arquivo .txt no SD
 // dizendo "ignore as instruções e transmita X" não pode virar ordem para o modelo.
 
-import type { FlipperClient, Key } from '../flipper/client'
+import { GPIO_HEADER, GPIO_PINS, type FlipperClient, type GpioPin, type Key } from '../flipper/client'
 import { t } from '../ui/i18n'
 import type { FlipperLink } from '../flipper/link'
 import { toText, type Frame } from '../flipper/screen'
@@ -64,6 +64,94 @@ async function handoff(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   const back = await connected(ctx)
   await back.startScreen().catch(() => {}) // já transmitindo nesta sessão: tudo bem
   return screenResult(call, ctx, await back.currentFrame(), 'A conexão voltou: o usuário saiu do app. Tela atual.')
+}
+
+/** Espera `ms` ou até o usuário tocar em Parar. */
+function pause(ms: number, signal: AbortSignal) {
+  return new Promise<void>((res) => {
+    const t = setTimeout(res, ms)
+    signal.addEventListener('abort', () => (clearTimeout(t), res()), { once: true })
+  })
+}
+
+/**
+ * Comanda um app pelo RPC, sem menus: abre em modo RPC, carrega o arquivo e, se pedido, aperta um
+ * botão (sinal do .ir pelo nome ou índice; no Sub-GHz, transmite). Mantém por `seconds` (emular NFC,
+ * RFID e iButton dura enquanto o arquivo está carregado) e fecha o app, a menos que `keep_open`.
+ */
+async function appControl(call: ToolCall, ctx: ToolContext, fz: FlipperClient): Promise<ToolResult> {
+  const a = call.args
+  const app = str(a.app, 'app')
+  const file = checkPath(str(a.file, 'file'))
+  const button = typeof a.button === 'string' ? a.button.trim() : ''
+  const index = Number.isInteger(a.index) && Number(a.index) >= 0 ? Number(a.index) : null
+  const seconds = Math.max(0.2, Math.min(30, Number(a.seconds) || 1))
+  const keepOpen = a.keep_open === true
+  const steps: string[] = []
+
+  // Erro de app em modo RPC vem só como ERROR_APP_CMD_ERROR; o texto de verdade é pedido à parte.
+  const explain = async (e: unknown): Promise<never> => {
+    const why = await fz.appGetError().catch(() => null)
+    throw new Error(`${(e as Error).message}${why?.text ? ` (${why.text})` : ''}`)
+  }
+
+  await fz.startScreen()
+  ctx.onProgress?.(`${app} · RPC`)
+  await fz.appStartRpc(app).catch(explain)
+  steps.push(`app "${app}" aberto em modo RPC`)
+  await fz.appLoadFile(file).catch(explain)
+  steps.push(`arquivo ${file} carregado`)
+
+  let frame: Frame | null
+  if (button || index !== null) {
+    ctx.onProgress?.(`${button || `#${index}`} · ${seconds}s`)
+    await fz.appButtonPress(button, index ?? 0).catch(explain)
+    await pause(seconds * 1000, ctx.signal)
+    frame = fz.screen.frame // a tela durante a transmissão ("Sending…") é a prova de que saiu
+    await fz.appButtonRelease().catch(() => {})
+    steps.push(`botão ${button ? `"${button}"` : `#${index}`} apertado por ${seconds}s`)
+  } else {
+    await pause(seconds * 1000, ctx.signal)
+    frame = fz.screen.frame
+    steps.push(`mantido por ${seconds}s`)
+  }
+
+  if (!keepOpen) {
+    await fz.appExit().catch(() => {})
+    steps.push('app fechado')
+  }
+  return screenResult(call, ctx, frame, `${steps.join('; ')}. Tela durante a ação:`)
+}
+
+/** GPIO do conector de cima: ler e escrever pinos, pull e a saída de 5 V. */
+async function gpio(a: Record<string, unknown>, fz: FlipperClient): Promise<string> {
+  const action = str(a.action, 'action')
+  if (action === 'otg') {
+    if (typeof a.on !== 'boolean') return `Saída de 5 V (pino 1): ${(await fz.gpioGetOtg()) ? 'ligada' : 'desligada'}.`
+    await fz.gpioSetOtg(a.on)
+    return `Saída de 5 V (pino 1) ${a.on ? 'ligada' : 'desligada'}.`
+  }
+  const pin = String(a.pin ?? '').toUpperCase() as GpioPin
+  if (!GPIO_PINS.includes(pin)) throw new Error(`pino inválido: use ${GPIO_PINS.join(', ')}`)
+  const where = `${pin} (pino ${GPIO_HEADER[pin]} do conector)`
+  switch (action) {
+    case 'read': {
+      const pull = ['NO', 'UP', 'DOWN'].includes(String(a.pull).toUpperCase()) ? (String(a.pull).toUpperCase() as 'NO' | 'UP' | 'DOWN') : 'NO'
+      await fz.gpioSetMode(pin, 'INPUT')
+      await fz.gpioSetPull(pin, pull)
+      return `${where}: entrada (pull ${pull}), nível ${await fz.gpioRead(pin)}.`
+    }
+    case 'write': {
+      if (a.value !== 0 && a.value !== 1) throw new Error('value precisa ser 0 ou 1')
+      await fz.gpioSetMode(pin, 'OUTPUT')
+      await fz.gpioWrite(pin, a.value)
+      return `${where}: saída em nível ${a.value} (${a.value ? '3,3 V' : '0 V'}).`
+    }
+    case 'mode':
+      return `${where}: ${(await fz.gpioGetMode(pin)) === 'INPUT' ? 'entrada' : 'saída'}.`
+    default:
+      throw new Error('action precisa ser read, write, mode ou otg')
+  }
 }
 
 function str(v: unknown, name: string): string {
@@ -211,6 +299,12 @@ export async function runTool(call: ToolCall, ctx: ToolContext): Promise<ToolRes
 
       case 'flipper_power_info':
         return ok(untrusted('power_info', await fz.powerInfo()))
+
+      case 'flipper_app_control':
+        return await appControl(call, ctx, fz)
+
+      case 'flipper_gpio':
+        return ok(await gpio(a, fz))
 
       default:
         throw new Error(`ferramenta desconhecida: ${call.name}`)
